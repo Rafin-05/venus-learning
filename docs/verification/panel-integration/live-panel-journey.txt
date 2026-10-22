@@ -1,0 +1,24 @@
+PASS: admin session login and profile
+PASS: instructor session login and profile
+PASS: learner session login and profile
+PASS: Instructor-authored course reaches administrator approval queue
+PASS: Administrator approval publishes the same course to learner catalog
+PASS: Learner enrollment appears in instructor student roster
+PASS: Learner quiz response does not expose answer keys
+PASS: Shared API grades learner quiz
+PASS: Learner certificate is issued from shared progress and quiz records
+PASS: Learner cannot access administrator panel API or moderation actions
+PASS: Administrator support response reaches the learner panel
+PASS: admin session remains valid across API replicas
+PASS: admin session remains valid across API replicas
+PASS: admin session remains valid across API replicas
+PASS: admin session remains valid across API replicas
+PASS: instructor session remains valid across API replicas
+PASS: instructor session remains valid across API replicas
+PASS: instructor session remains valid across API replicas
+PASS: instructor session remains valid across API replicas
+PASS: learner session remains valid across API replicas
+PASS: learner session remains valid across API replicas
+PASS: learner session remains valid across API replicas
+PASS: learner session remains valid across API replicas
+Completed live cross-panel HTTP journey. Evaluation records remain only in the test database.

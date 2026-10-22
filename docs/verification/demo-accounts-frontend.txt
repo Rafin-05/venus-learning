@@ -1,0 +1,10 @@
+PASS: GET uses the shared /api origin, cookies and no-store
+PASS: Every mutation fetches a fresh CSRF token, including after login rotation
+PASS: Multipart uploads retain the browser-generated content boundary
+PASS: Missing CSRF prevents a mutation
+PASS: All pagination pages are combined without following an external host
+PASS: Pagination cannot redirect to another API resource
+PASS: DRF nested validation errors are displayed as plain readable text
+PASS: Rate-limit, network and empty-delete responses are handled
+PASS: External API paths are rejected before a request
+Completed 9 shared API client tests.

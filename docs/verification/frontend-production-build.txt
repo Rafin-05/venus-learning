@@ -1,0 +1,63 @@
+
+> build
+> next build
+
+▲ Next.js 16.4.2 (Turbopack)
+✓ Running next.config.mjs took 25ms
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 679ms
+  Running TypeScript ...
+  Finished TypeScript in 2.0s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/30) ...
+  Generating static pages using 7 workers (7/30) 
+  Generating static pages using 7 workers (14/30) 
+  Generating static pages using 7 workers (22/30) 
+✓ Generating static pages using 7 workers (30/30) in 252ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /admin
+├ ƒ /admin/contests
+├ ƒ /admin/courses
+├ ƒ /admin/instructors
+├ ƒ /admin/issues
+├ ƒ /admin/problems
+├ ƒ /admin/quizzes
+├ ƒ /admin/users
+├ ƒ /certificates
+├ ƒ /coding-problems
+├ ƒ /coding-problems/[id]
+├ ƒ /contest-history
+├ ƒ /contests
+├ ƒ /contests/[id]
+├ ƒ /courses
+├ ƒ /courses/[id]
+├ ƒ /dashboard
+├ ƒ /instructor
+├ ƒ /instructor/courses
+├ ƒ /instructor/courses/[id]
+├ ƒ /instructor/courses/new
+├ ƒ /instructor/quizzes
+├ ƒ /leaderboard
+├ ƒ /learn/[id]
+├ ƒ /learning/[id]
+├ ƒ /login
+├ ƒ /my-learning
+├ ƒ /profile
+├ ƒ /register
+├ ƒ /report-issue
+├ ƒ /reset
+├ ƒ /reset/[token]
+├ ƒ /submissions
+├ ƒ /verify
+└ ƒ /verify/[token]
+
+
+ƒ Proxy (Middleware)
+
+ƒ  (Dynamic)  server-rendered on demand
+

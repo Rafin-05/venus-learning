@@ -1,0 +1,13 @@
+PASS: API health reaches MySQL
+PASS: Next.js homepage and Venus branding
+PASS: Nonce-based production script CSP
+PASS: Rendered framework scripts carry the CSP nonce
+PASS: Nonce changes for each document response
+PASS: Anti-framing and MIME-sniffing headers
+PASS: Public approved catalog
+PASS: Anonymous account access is denied
+PASS: Anonymous login requires CSRF
+PASS: Malformed email is rejected server-side
+PASS: Raw media directory is not publicly served
+PASS: Dotfiles are blocked
+Completed 12 smoke checks. No account credentials or session tokens were displayed.

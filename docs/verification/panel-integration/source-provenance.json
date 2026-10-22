@@ -1,0 +1,8 @@
+{
+  "source_archive": "/home/ubuntu/upload/693af286d607fa885e07fee0_venus-learning-final.zip",
+  "source_sha256": "d11e888f9e8ccfe437f216bad7dd6c9e1dc349d455703de03b2907566df532c5",
+  "supplied_logo": "/home/ubuntu/upload/3d9de23967df1874b6998be4_PremiumVenuslearningWordmark.png",
+  "supplied_logo_sha256": "0c0ba7a679f5e5f4fb771c9ebaa52652dc593e55ed9381c8123bfe1163024325",
+  "preserved_logo": "frontend/public/venus-wordmark-original.png",
+  "earlier_learnspace_archive_used": false
+}

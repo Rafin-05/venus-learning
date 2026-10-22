@@ -1,0 +1,6 @@
+PASS: instructor course/unit/lesson/quiz authoring -> pending review -> staff approval
+PASS: enrollment -> private PDF download -> persisted lesson progress -> server-graded quiz -> named certificate
+PASS: learner rating -> issue report -> staff response -> learner issue history
+PASS: canonical avatar upload -> public PNG download
+PASS: MCQ contest submission -> graded result
+PASS: unconfigured code runner fails closed with HTTP 503

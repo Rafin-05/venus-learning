@@ -1,0 +1,89 @@
+Creating test database for alias 'default' ('test_venus_test')...
+Found 50 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, rest_framework, staticfiles
+  Apply all migrations: admin, auth, contenttypes, core, sessions
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0001_initial... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying core.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying core.0002_problemcompletion... OK
+  Applying core.0003_contest_prizes... OK
+  Applying core.0004_assets... OK
+  Applying core.0005_alter_uploadedasset_options... OK
+  Applying sessions.0001_initial...test_anonymous_and_learner_cannot_mutate_courses_units_lessons_quizzes_problems (core.test_acceptance.CatalogAndAuthorizationTests.test_anonymous_and_learner_cannot_mutate_courses_units_lessons_quizzes_problems) ... ok
+test_enroll_is_idempotent_and_pending_course_is_not_publicly_enrollable (core.test_acceptance.CatalogAndAuthorizationTests.test_enroll_is_idempotent_and_pending_course_is_not_publicly_enrollable) ... ok
+test_enrollment_is_required_to_read_lesson_and_submit_quiz (core.test_acceptance.CatalogAndAuthorizationTests.test_enrollment_is_required_to_read_lesson_and_submit_quiz) ... ok
+test_instructor_ownership_is_enforced_for_nested_resources (core.test_acceptance.CatalogAndAuthorizationTests.test_instructor_ownership_is_enforced_for_nested_resources) ... ok
+test_numeric_progress_range_and_coding_cannot_self_complete (core.test_acceptance.CatalogAndAuthorizationTests.test_numeric_progress_range_and_coding_cannot_self_complete) ... ok
+test_pending_owner_can_edit_but_other_users_cannot (core.test_acceptance.CatalogAndAuthorizationTests.test_pending_owner_can_edit_but_other_users_cannot) ... ok
+test_public_catalog_only_approved_and_no_secret_fields (core.test_acceptance.CatalogAndAuthorizationTests.test_public_catalog_only_approved_and_no_secret_fields) ... ok
+test_unapproved_instructor_cannot_create_course (core.test_acceptance.CatalogAndAuthorizationTests.test_unapproved_instructor_cannot_create_course) ... ok
+test_coding_runner_unavailable_is_503_and_private_expected_output_is_not_returned (core.test_acceptance.CodingRatingAndStaffTests.test_coding_runner_unavailable_is_503_and_private_expected_output_is_not_returned) ... ok
+test_judge0_compares_stdout_not_only_accepted_status (core.test_acceptance.CodingRatingAndStaffTests.test_judge0_compares_stdout_not_only_accepted_status) ... ok
+test_only_staff_can_issue_response_and_status_updates (core.test_acceptance.CodingRatingAndStaffTests.test_only_staff_can_issue_response_and_status_updates) ... ok
+test_rating_requires_enrollment_and_ownership (core.test_acceptance.CodingRatingAndStaffTests.test_rating_requires_enrollment_and_ownership) ... ok
+test_staff_user_patch_whitelist_cannot_escalate_role (core.test_acceptance.CodingRatingAndStaffTests.test_staff_user_patch_whitelist_cannot_escalate_role) ... ok
+test_contest_answers_and_upcoming_questions_are_hidden (core.test_acceptance.ContestAndAuthTests.test_contest_answers_and_upcoming_questions_are_hidden) ... ok
+test_contest_mutation_is_staff_only_and_malformed_answers_are_400 (core.test_acceptance.ContestAndAuthTests.test_contest_mutation_is_staff_only_and_malformed_answers_are_400) ... ok
+test_ended_contest_leaderboard_remains_accessible_and_duplicate_submit_conflicts (core.test_acceptance.ContestAndAuthTests.test_ended_contest_leaderboard_remains_accessible_and_duplicate_submit_conflicts) ... ok
+test_login_requires_csrf_and_account_lockout_survives_ip_changes_and_expires (core.test_acceptance.ContestAndAuthTests.test_login_requires_csrf_and_account_lockout_survives_ip_changes_and_expires) ... ok
+test_password_reset_absolute_link_expiration_and_reuse (core.test_acceptance.ContestAndAuthTests.test_password_reset_absolute_link_expiration_and_reuse) ... ok
+test_register_csrf_required_and_verification_link_is_absolute_one_use (core.test_acceptance.ContestAndAuthTests.test_register_csrf_required_and_verification_link_is_absolute_one_use) ... ok
+test_coding_lesson_success_persists_progress_without_exposing_expected (core.test_acceptance.HardeningTests.test_coding_lesson_success_persists_progress_without_exposing_expected) ... ok
+test_invalid_email_and_privileged_registration_are_rejected (core.test_acceptance.HardeningTests.test_invalid_email_and_privileged_registration_are_rejected) ... ok
+test_invalid_numeric_progress_and_query_filter_do_not_crash (core.test_acceptance.HardeningTests.test_invalid_numeric_progress_and_query_filter_do_not_crash) ... ok
+test_javascript_urls_and_profile_privilege_edits_are_rejected (core.test_acceptance.HardeningTests.test_javascript_urls_and_profile_privilege_edits_are_rejected) ... ok
+test_owner_can_retrieve_pending_full_curriculum (core.test_acceptance.HardeningTests.test_owner_can_retrieve_pending_full_curriculum) ... ok
+test_problem_grades_every_case_not_only_the_first (core.test_acceptance.HardeningTests.test_problem_grades_every_case_not_only_the_first) ... ok
+test_public_course_detail_never_contains_private_lesson_data (core.test_acceptance.HardeningTests.test_public_course_detail_never_contains_private_lesson_data) ... ok
+test_sql_injection_search_remains_a_literal_parameter (core.test_acceptance.HardeningTests.test_sql_injection_search_remains_a_literal_parameter) ... ok
+test_staff_can_actually_approve_instructor_block_user_and_publish_course (core.test_acceptance.HardeningTests.test_staff_can_actually_approve_instructor_block_user_and_publish_course) ... ok
+test_submissions_attempts_and_tickets_are_user_scoped (core.test_acceptance.HardeningTests.test_submissions_attempts_and_tickets_are_user_scoped) ... ok
+test_successful_problem_awards_points_once (core.test_acceptance.HardeningTests.test_successful_problem_awards_points_once) ... ok
+test_unverified_blocked_and_unapproved_sessions_are_denied (core.test_acceptance.HardeningTests.test_unverified_blocked_and_unapproved_sessions_are_denied) ... ok
+test_instructor_revocation_hides_catalog_enrollment_and_private_content (core.test_acceptance.PublicationAndPrizeTests.test_instructor_revocation_hides_catalog_enrollment_and_private_content) ... ok
+test_ranked_prize_positions_must_be_unique_numeric_and_sorted (core.test_acceptance.PublicationAndPrizeTests.test_ranked_prize_positions_must_be_unique_numeric_and_sorted) ... ok
+test_certificate_issues_once_after_all_requirements (core.test_acceptance.QuizAndCertificateTests.test_certificate_issues_once_after_all_requirements) ... ok
+test_certificate_rejects_empty_and_incomplete_coding_and_missing_quiz_pass (core.test_acceptance.QuizAndCertificateTests.test_certificate_rejects_empty_and_incomplete_coding_and_missing_quiz_pass) ... ok
+test_learner_quiz_payload_hides_answer_key_but_owner_can_edit (core.test_acceptance.QuizAndCertificateTests.test_learner_quiz_payload_hides_answer_key_but_owner_can_edit) ... ok
+test_malformed_quiz_ids_and_answers_return_400_not_500 (core.test_acceptance.QuizAndCertificateTests.test_malformed_quiz_ids_and_answers_return_400_not_500) ... ok
+test_nested_quiz_write_preserves_correct_answer_and_rejects_empty (core.test_acceptance.QuizAndCertificateTests.test_nested_quiz_write_preserves_correct_answer_and_rejects_empty) ... ok
+test_quiz_attempt_hides_answer_payload (core.test_acceptance.QuizAndCertificateTests.test_quiz_attempt_hides_answer_payload) ... ok
+test_authenticated_multipart_upload_requires_csrf (core.test_assets.AssetWorkflowTests.test_authenticated_multipart_upload_requires_csrf) ... ok
+test_fake_image_oversize_svg_and_bad_pdf_rejected (core.test_assets.AssetWorkflowTests.test_fake_image_oversize_svg_and_bad_pdf_rejected) ... ok
+test_metadata_is_removed (core.test_assets.AssetWorkflowTests.test_metadata_is_removed) ... ok
+test_private_pdf_requires_enrollment_and_current_publisher_approval (core.test_assets.AssetWorkflowTests.test_private_pdf_requires_enrollment_and_current_publisher_approval) ... ok
+test_raster_conversion_changes_stored_bytes_to_png (core.test_assets.AssetWorkflowTests.test_raster_conversion_changes_stored_bytes_to_png) ... ok
+test_thumbnail_edit_requires_reapproval (core.test_assets.AssetWorkflowTests.test_thumbnail_edit_requires_reapproval) ... ok
+test_upload_permissions_and_invalid_course_are_controlled (core.test_assets.AssetWorkflowTests.test_upload_permissions_and_invalid_course_are_controlled) ... ok
+test_bruteforce_lockout (core.tests.ApiTests.test_bruteforce_lockout) ... ok
+test_code_never_runs_without_runner (core.tests.ApiTests.test_code_never_runs_without_runner) ... ok
+test_login_and_me (core.tests.ApiTests.test_login_and_me) ... ok
+test_quiz_is_graded_server_side (core.tests.ApiTests.test_quiz_is_graded_server_side) ... ok
+
+----------------------------------------------------------------------
+Ran 50 tests in 11.704s
+
+OK
+Destroying test database for alias 'default' ('test_venus_test')...
+ OK
+System check identified no issues (0 silenced).
