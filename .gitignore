@@ -1,0 +1,45 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+
+# Python / Django
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+*.sqlite3
+*.sqlite3-*
+media/
+staticfiles/
+
+# Node / Next.js generated output
+node_modules/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.pnpm-store/
+
+# Runtime and local tooling
+*.log
+logs/
+.DS_Store
+.vscode/
+.idea/
+docker-compose.override.yml
+
+# Private TLS/key material
+deploy/tls/*.pem
+deploy/tls/*.key
+deploy/tls/*.p12
+deploy/tls/*.pfx

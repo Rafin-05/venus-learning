@@ -1,0 +1,33 @@
+# Docker Compose plugin >= 2.24.4 is required for !override.
+# Supply deploy/tls/fullchain.pem and deploy/tls/privkey.pem.
+# Set actual domain, CSRF_TRUSTED_ORIGINS, FRONTEND_URL and SMTP in .env.
+services:
+  init:
+    environment:
+      DEBUG: 'false'
+      ENABLE_DEMO_ACCOUNTS: 'false'
+  api1:
+    environment:
+      DEBUG: 'false'
+      ENABLE_DEMO_ACCOUNTS: 'false'
+      SECURE_SSL_REDIRECT: 'true'
+      SESSION_COOKIE_SECURE: 'true'
+      CSRF_COOKIE_SECURE: 'true'
+      TRUST_PROXY: 'true'
+  api2:
+    environment:
+      DEBUG: 'false'
+      ENABLE_DEMO_ACCOUNTS: 'false'
+      SECURE_SSL_REDIRECT: 'true'
+      SESSION_COOKIE_SECURE: 'true'
+      CSRF_COOKIE_SECURE: 'true'
+      TRUST_PROXY: 'true'
+  nginx:
+    ports: !override
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/nginx.tls.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+      - static:/srv/static:ro
+      - media:/srv/media:ro

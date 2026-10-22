@@ -1,0 +1,94 @@
+name: venus-learning
+x-api-env: &api-env
+  DB_ENGINE: mysql
+  MYSQL_HOST: db
+  MYSQL_PORT: 3306
+  MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+  MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+  MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+  REDIS_URL: redis://redis:6379/0
+x-api: &api
+  build: ./backend
+  image: venus-learning-api:local
+  env_file: .env
+  environment: *api-env
+  entrypoint: []
+  command: ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "${WEB_CONCURRENCY:-3}", "--access-logfile", "-", "--error-logfile", "-"]
+  depends_on:
+    init: {condition: service_completed_successfully}
+    redis: {condition: service_healthy}
+  volumes: [static:/app/staticfiles, media:/app/media]
+  expose: ["8000"]
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"]
+    interval: 15s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Set MYSQL_DATABASE in .env}
+      MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes: [mysql-data:/var/lib/mysql]
+    expose: ["3306"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes: [redis-data:/data]
+    expose: ["6379"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 3s, retries: 10}
+  init:
+    build: ./backend
+    image: venus-learning-api:local
+    env_file: .env
+    environment: *api-env
+    entrypoint: []
+    command: ["/bin/sh", "-c", "python manage.py migrate --noinput && python manage.py collectstatic --noinput"]
+    depends_on: {db: {condition: service_healthy}}
+    volumes: [static:/app/staticfiles, media:/app/media]
+    restart: "no"
+    security_opt: [no-new-privileges:true]
+  api1: *api
+  api2: *api
+  frontend:
+    build: ./frontend
+    image: venus-learning-frontend:local
+    environment: {NODE_ENV: production, HOSTNAME: 0.0.0.0, PORT: "3000"}
+    expose: ["3000"]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/', r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+  nginx:
+    image: nginx:1.28-alpine
+    ports: ["127.0.0.1:${HTTP_PORT:-8080}:80"]
+    volumes: [./deploy/nginx.conf:/etc/nginx/nginx.conf:ro, static:/srv/static:ro, media:/srv/media:ro]
+    depends_on:
+      api1: {condition: service_healthy}
+      api2: {condition: service_healthy}
+      frontend: {condition: service_healthy}
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+volumes: {mysql-data: {}, redis-data: {}, static: {}, media: {}}
