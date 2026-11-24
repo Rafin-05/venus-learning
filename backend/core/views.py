@@ -1,6 +1,7 @@
 import ipaddress
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -25,6 +26,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .asset_models import UploadedAsset
 from .models import *
 from .publishing import published_courses, course_is_published
 from .permissions import Verified, EditorOnly, StaffOnly
@@ -50,6 +52,26 @@ def require_editor(user, course):
 def review_after_edit(user, course):
     if not staff(user) and course.status != 'pending':
         Course.objects.filter(pk=course.pk).update(status='pending')
+
+
+def attach_thumbnail_asset(course, user):
+    """Link a pre-uploaded thumbnail asset to its course.
+
+    An instructor can upload a thumbnail on the Create course page before
+    the course exists, so the asset is created unattached. Once the course
+    is created/updated with that asset's URL as its thumbnail, attach it
+    here, otherwise learners can never see the image: AssetContentView
+    only serves a thumbnail publicly when it belongs to a published course.
+    A URL that is not one of this user's uploaded thumbnails is ignored.
+    """
+    if not course.thumbnail:
+        return
+    match = re.search(r'/api/uploads/([0-9a-f-]{36})/content/', course.thumbnail)
+    if not match:
+        return
+    UploadedAsset.objects.filter(
+        pk=match.group(1), owner=user, purpose='thumbnail'
+    ).filter(Q(course__isnull=True) | Q(course=course)).update(course=course)
 
 
 def activity(user):
@@ -358,10 +380,12 @@ class CourseViewSet(viewsets.ModelViewSet):
         if not (approved(self.request.user) or staff(self.request.user)):
             raise PermissionDenied('Approved instructors only.')
         serializer.save(instructor=self.request.user, status='pending')
+        attach_thumbnail_asset(serializer.instance, self.request.user)
 
     def perform_update(self, serializer):
         require_editor(self.request.user, serializer.instance)
         serializer.save(status='pending' if not staff(self.request.user) else serializer.instance.status)
+        attach_thumbnail_asset(serializer.instance, self.request.user)
 
     def perform_destroy(self, course):
         require_editor(self.request.user, course)
