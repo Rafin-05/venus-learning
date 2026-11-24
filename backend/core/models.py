@@ -77,3 +77,4 @@ class ProblemCompletion(models.Model):
     class Meta:
         constraints=[models.UniqueConstraint(fields=['learner','problem'],name='unique_problem_completion')]
 from .asset_models import UploadedAsset
+from .mentor_models import MentorProfile, Wallet, WalletTransaction, MentorSession, SessionRequest, MentorOffer, SessionRating
