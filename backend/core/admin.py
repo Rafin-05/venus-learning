@@ -37,6 +37,33 @@ class AccountAdmin(UserAdmin):
 
 for model in (Course, Unit, Lesson, Enrollment, LessonProgress, Certificate, Quiz, Question, QuizAttempt, Contest, ContestAttempt, Problem, ProblemCompletion, Submission, Rating, SupportTicket, LoginAttempt, EmailToken, DailyActivity):
     admin.site.register(model)
+
+
+@admin.register(SessionRating)
+class SessionRatingAdmin(admin.ModelAdmin):
+    list_display = ('session', 'student', 'mentor', 'rating', 'created_at')
+    list_filter = ('rating', 'created_at')
+    search_fields = ('comment', 'student__email', 'mentor__email', 'session__topic')
+    readonly_fields = ('created_at',)
+
+
+@admin.register(WalletTransaction)
+class WalletTransactionAdmin(admin.ModelAdmin):
+    list_display = ('kind', 'status', 'amount', 'fee_amount', 'deduction_amount', 'credited_amount', 'user', 'session', 'created_at')
+    list_filter = ('kind', 'status', 'created_at')
+    search_fields = ('note', 'user__email')
+    readonly_fields = ('created_at',)
+
+
+@admin.register(MentorSession)
+class MentorSessionAdmin(admin.ModelAdmin):
+    list_display = ('topic', 'student', 'mentor', 'scheduled_at', 'duration_hours', 'total_fee', 'status', 'payment_status')
+    list_filter = ('status', 'payment_status', 'source')
+    search_fields = ('topic', 'student__email', 'mentor__email')
+
+
+for model in (MentorProfile, Wallet, SessionRequest, MentorOffer):
+    admin.site.register(model)
 admin.site.site_header = 'Venus Learning administration'
 admin.site.site_title = 'Venus Learning'
 admin.site.index_title = 'Platform management'
