@@ -62,6 +62,16 @@ class AssetUploadView(APIView):
         if purpose == 'avatar':
             if request.data.get('course'):
                 raise ValidationError('Avatars cannot be attached to a course.')
+        elif purpose == 'thumbnail' and not request.data.get('course'):
+            # Pre-creation thumbnail upload (Create course page): the course
+            # does not exist yet, so the asset is created unattached
+            # (UploadedAsset.course is nullable). It is linked to the course
+            # by attach_thumbnail_asset() in views.py once the course is
+            # created with this asset's URL as its thumbnail. Only staff or
+            # an approved instructor may do this; Verified already ensures
+            # an instructor is approved, and learners are refused here.
+            if not (staff(request.user) or request.user.role == 'instructor'):
+                raise PermissionDenied('Only an approved instructor or staff can upload a course thumbnail.')
         else:
             course_id = str(request.data.get('course', ''))
             if not course_id.isdigit():
@@ -88,7 +98,7 @@ class AssetUploadView(APIView):
                 if purpose == 'avatar':
                     request.user.profile_pic = url
                     request.user.save(update_fields=['profile_pic'])
-                elif purpose == 'thumbnail':
+                elif purpose == 'thumbnail' and course is not None:
                     course.thumbnail = url
                     if not staff(request.user):
                         course.status = 'pending'
