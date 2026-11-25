@@ -17,6 +17,7 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser,PermissionsMixin):
     ROLE_CHOICES=(('learner','Learner'),('instructor','Instructor'),('admin','Admin'))
     email=models.EmailField(unique=True); full_name=models.CharField(max_length=150); role=models.CharField(max_length=20,choices=ROLE_CHOICES,default='learner')
+    title=models.CharField(max_length=150,blank=True)
     bio=models.TextField(blank=True); expertise=models.CharField(max_length=255,blank=True); profile_pic=models.URLField(blank=True)
     is_verified=models.BooleanField(default=False); instructor_approved=models.BooleanField(default=False); is_active=models.BooleanField(default=True); is_staff=models.BooleanField(default=False); is_demo_account=models.BooleanField(default=False)
     current_streak=models.PositiveIntegerField(default=0); points=models.PositiveIntegerField(default=0); verification_token=models.UUIDField(default=uuid.uuid4,editable=False)
