@@ -3,8 +3,11 @@ export type User = {
   bio?: string; expertise?: string; profile_pic?: string; is_verified: boolean; current_streak: number;
 };
 export type Course = {
-  id: number; title: string; description: string; category: string; level: string;
-  thumbnail?: string; instructor_name?: string; status?: string;
+  id: number; title: string; subtitle?: string; description: string; category: string; subcategory?: string;
+  level: string; language?: string; thumbnail?: string; promo_video_url?: string; promo_provider_video_id?: string;
+  outcomes?: string[]; target_audience?: string; prerequisites?: string;
+  price?: number | string; is_free?: boolean; enrollment_open?: boolean; access_duration_days?: number | null;
+  completion_threshold?: number; instructor_name?: string; status?: string;
   average_rating?: number; student_count?: number; lesson_count?: number;
 };
 

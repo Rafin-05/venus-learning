@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import serializers
 from .models import *
+from .video import extract_youtube_id, is_youtube_url
 
 
 def is_staff_user(user):
@@ -73,8 +74,8 @@ class CourseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Course
-        fields = ('id', 'title', 'description', 'category', 'level', 'thumbnail', 'instructor', 'instructor_name', 'status', 'created_at', 'average_rating', 'student_count', 'lesson_count')
-        read_only_fields = ('id', 'instructor', 'instructor_name', 'status', 'created_at')
+        fields = ('id', 'title', 'subtitle', 'description', 'category', 'subcategory', 'level', 'language', 'thumbnail', 'promo_video_url', 'promo_provider_video_id', 'outcomes', 'target_audience', 'prerequisites', 'price', 'is_free', 'enrollment_open', 'access_duration_days', 'completion_threshold', 'instructor', 'instructor_name', 'status', 'created_at', 'average_rating', 'student_count', 'lesson_count')
+        read_only_fields = ('id', 'instructor', 'instructor_name', 'status', 'created_at', 'promo_provider_video_id')
 
     def get_average_rating(self, course):
         from django.db.models import Avg
@@ -89,6 +90,49 @@ class CourseSerializer(serializers.ModelSerializer):
     def validate_thumbnail(self, value):
         return safe_url(value)
 
+    def validate_promo_video_url(self, value):
+        return safe_url(value)
+
+    def validate_price(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError('Price cannot be negative.')
+        return value
+
+    def validate_completion_threshold(self, value):
+        if not 1 <= value <= 100:
+            raise serializers.ValidationError('Completion threshold must be between 1 and 100.')
+        return value
+
+    def validate_outcomes(self, value):
+        if value is None:
+            return []
+        if not isinstance(value, list) or len(value) > 20:
+            raise serializers.ValidationError('Outcomes must be a list of at most 20 items.')
+        cleaned = []
+        for item in value:
+            if not isinstance(item, str) or not item.strip() or len(item) > 200:
+                raise serializers.ValidationError('Each outcome must be text of 1–200 characters.')
+            cleaned.append(item.strip())
+        return cleaned
+
+    def validate(self, data):
+        price = data.get('price', getattr(self.instance, 'price', None))
+        is_free = data.get('is_free', getattr(self.instance, 'is_free', True))
+        if is_free and price not in (None, 0):
+            raise serializers.ValidationError({'price': 'A free course must have price 0. Untick "free" to charge.'})
+        if not is_free and (price is None or price <= 0):
+            raise serializers.ValidationError({'price': 'A paid course needs a price above 0.'})
+        promo = data.get('promo_video_url', getattr(self.instance, 'promo_video_url', ''))
+        if promo:
+            if is_youtube_url(promo):
+                video_id = extract_youtube_id(promo)
+                if not video_id:
+                    raise serializers.ValidationError({'promo_video_url': 'That YouTube link has no valid video ID.'})
+                data['promo_provider_video_id'] = video_id
+            else:
+                data['promo_provider_video_id'] = ''
+        return data
+
 
 class StaffCourseSerializer(CourseSerializer):
     class Meta(CourseSerializer.Meta):
@@ -98,16 +142,18 @@ class StaffCourseSerializer(CourseSerializer):
 class CurriculumLessonSerializer(serializers.ModelSerializer):
     class Meta:
         model = Lesson
-        fields = ('id', 'title', 'lesson_type', 'position')
+        fields = ('id', 'title', 'lesson_type', 'position', 'duration_seconds', 'is_preview', 'is_required', 'provider_video_id')
 
 
 class LessonSerializer(serializers.ModelSerializer):
     progress = serializers.SerializerMethodField()
+    watch_percentage = serializers.SerializerMethodField()
+    resume_position_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Lesson
-        fields = ('id', 'unit', 'title', 'content', 'video_url', 'document_url', 'lesson_type', 'coding_language', 'coding_boilerplate', 'coding_expected_output', 'position', 'progress')
-        read_only_fields = ('id', 'progress')
+        fields = ('id', 'unit', 'title', 'description', 'content', 'video_url', 'provider', 'provider_video_id', 'document_url', 'lesson_type', 'coding_language', 'coding_boilerplate', 'coding_expected_output', 'position', 'duration_seconds', 'is_preview', 'is_required', 'progress', 'watch_percentage', 'resume_position_seconds')
+        read_only_fields = ('id', 'progress', 'provider', 'provider_video_id', 'watch_percentage', 'resume_position_seconds')
         extra_kwargs = {'content': {'max_length': 100000}, 'coding_boilerplate': {'max_length': 100000}, 'coding_expected_output': {'max_length': 20000}}
 
     def get_progress(self, lesson):
@@ -115,6 +161,20 @@ class LessonSerializer(serializers.ModelSerializer):
         if not request or not request.user.is_authenticated:
             return 0
         return LessonProgress.objects.filter(enrollment__learner=request.user, lesson=lesson).values_list('progress', flat=True).first() or 0
+
+    def _progress_row(self, lesson):
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return None
+        return LessonProgress.objects.filter(enrollment__learner=request.user, lesson=lesson).first()
+
+    def get_watch_percentage(self, lesson):
+        row = self._progress_row(lesson)
+        return row.watch_percentage if row else 0
+
+    def get_resume_position_seconds(self, lesson):
+        row = self._progress_row(lesson)
+        return row.resume_position_seconds if row else 0
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -130,8 +190,8 @@ class LessonSerializer(serializers.ModelSerializer):
         return safe_url(value)
 
     def validate_lesson_type(self, value):
-        if value not in ('video', 'document', 'coding'):
-            raise serializers.ValidationError('Choose video, document, or coding.')
+        if value not in ('video', 'document', 'coding', 'resource', 'quiz', 'assignment'):
+            raise serializers.ValidationError('Choose video, document, coding, resource, quiz, or assignment.')
         return value
 
     def validate(self, data):
@@ -140,6 +200,20 @@ class LessonSerializer(serializers.ModelSerializer):
             language = data.get('coding_language', getattr(self.instance, 'coding_language', ''))
             if str(language).lower() not in ('50', '54', '60', '62', '63', '71', '73', '74', '78', 'python', 'javascript', 'java', 'cpp', 'c++', 'c', 'go', 'rust'):
                 raise serializers.ValidationError({'coding_language': 'Choose a supported execution language.'})
+        video_url = data.get('video_url', getattr(self.instance, 'video_url', ''))
+        if video_url:
+            if is_youtube_url(video_url):
+                video_id = extract_youtube_id(video_url)
+                if not video_id:
+                    raise serializers.ValidationError({'video_url': 'That YouTube link has no valid video ID.'})
+                data['provider'] = 'youtube'
+                data['provider_video_id'] = video_id
+            else:
+                data['provider'] = 'external'
+                data['provider_video_id'] = ''
+        elif 'video_url' in data:
+            data['provider'] = 'youtube'
+            data['provider_video_id'] = ''
         return data
 
 
@@ -177,8 +251,14 @@ class EnrollmentSerializer(serializers.ModelSerializer):
     progress_percent = serializers.SerializerMethodField()
 
     def get_progress_percent(self, enrollment):
-        total = Lesson.objects.filter(unit__course=enrollment.course).count()
-        done = enrollment.progress.filter(progress=100, lesson__unit__course=enrollment.course).count()
+        # PDF §17: course progress is completed required items / total required items.
+        required = Lesson.objects.filter(unit__course=enrollment.course, is_required=True)
+        total = required.count()
+        if not total:
+            total = Lesson.objects.filter(unit__course=enrollment.course).count()
+            done = enrollment.progress.filter(progress=100, lesson__unit__course=enrollment.course).count()
+        else:
+            done = enrollment.progress.filter(progress=100, lesson__in=required).count()
         return round(done * 100 / total) if total else 0
 
     class Meta:
@@ -243,12 +323,20 @@ class QuizSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Quiz
-        fields = ('id', 'course', 'title', 'pass_percentage', 'questions', 'owner')
+        fields = ('id', 'course', 'lesson', 'title', 'pass_percentage', 'time_limit_minutes', 'attempts_allowed', 'shuffle_questions', 'shuffle_options', 'show_answers', 'questions', 'owner')
         read_only_fields = ('id', 'owner')
 
     def validate_pass_percentage(self, value):
         if not 1 <= value <= 100:
             raise serializers.ValidationError('Pass mark must be between 1 and 100.')
+        return value
+
+    def validate_lesson(self, value):
+        if value is None:
+            return value
+        course = self.initial_data.get('course')
+        if course and value.unit.course_id != int(course):
+            raise serializers.ValidationError('The lesson must belong to this quiz\'s course.')
         return value
 
     def validate_questions(self, questions):
@@ -302,6 +390,71 @@ class QuizSerializer(serializers.ModelSerializer):
 
 # Alias retained for integrations that imported the previous write serializer.
 QuizWriteSerializer = QuizSerializer
+
+
+class CourseReviewSerializer(serializers.ModelSerializer):
+    reviewer_name = serializers.CharField(source='reviewer.full_name', read_only=True, default='')
+
+    class Meta:
+        model = CourseReview
+        fields = ('id', 'course', 'reviewer', 'reviewer_name', 'decision', 'notes', 'created_at')
+        read_only_fields = ('id', 'reviewer', 'reviewer_name', 'created_at')
+
+
+class CourseResourceSerializer(serializers.ModelSerializer):
+    download_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CourseResource
+        fields = ('id', 'course', 'lesson', 'title', 'description', 'asset', 'external_url', 'downloadable', 'original_name', 'mime_type', 'size_bytes', 'download_url', 'created_at')
+        read_only_fields = ('id', 'download_url', 'created_at')
+        extra_kwargs = {'description': {'max_length': 5000}}
+
+    def get_download_url(self, resource):
+        if resource.asset_id:
+            return f'/api/uploads/{resource.asset_id}/content/'
+        return resource.external_url or ''
+
+    def validate_external_url(self, value):
+        return safe_url(value)
+
+    def validate(self, data):
+        asset = data.get('asset', getattr(self.instance, 'asset', None))
+        external = data.get('external_url', getattr(self.instance, 'external_url', ''))
+        if asset and external:
+            raise serializers.ValidationError('Attach either an uploaded file or an external link, not both.')
+        if not asset and not external:
+            raise serializers.ValidationError('Attach an uploaded file or an external link.')
+        lesson = data.get('lesson', getattr(self.instance, 'lesson', None))
+        course = data.get('course', getattr(self.instance, 'course', None))
+        if lesson and course and lesson.unit.course_id != course.id:
+            raise serializers.ValidationError({'lesson': 'The lesson must belong to this resource\'s course.'})
+        return data
+
+
+class AssignmentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Assignment
+        fields = ('id', 'course', 'lesson', 'title', 'instructions', 'due_at', 'max_points', 'rubric', 'accepted_types', 'is_required', 'created_at')
+        read_only_fields = ('id', 'created_at')
+        extra_kwargs = {'instructions': {'max_length': 20000}, 'rubric': {'max_length': 10000}}
+
+    def validate(self, data):
+        lesson = data.get('lesson', getattr(self.instance, 'lesson', None))
+        course = data.get('course', getattr(self.instance, 'course', None))
+        if lesson and course and lesson.unit.course_id != course.id:
+            raise serializers.ValidationError({'lesson': 'The lesson must belong to this assignment\'s course.'})
+        return data
+
+
+class AssignmentSubmissionSerializer(serializers.ModelSerializer):
+    learner_name = serializers.CharField(source='learner.full_name', read_only=True, default='')
+
+    class Meta:
+        model = AssignmentSubmission
+        fields = ('id', 'assignment', 'learner', 'learner_name', 'text_response', 'asset', 'attempt_no', 'status', 'score', 'feedback', 'graded_by', 'graded_at', 'submitted_at')
+        read_only_fields = ('id', 'learner', 'learner_name', 'attempt_no', 'status', 'score', 'feedback', 'graded_by', 'graded_at', 'submitted_at')
+        extra_kwargs = {'text_response': {'max_length': 50000}}
 
 
 class ProblemSerializer(serializers.ModelSerializer):
