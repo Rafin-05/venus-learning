@@ -1,6 +1,7 @@
 'use client';
 
 import {FormEvent, useCallback, useEffect, useState} from 'react';
+import Link from 'next/link';
 import PortalShell from '../../components/PortalShell';
 import {all, api, patch, post, type User} from '../../lib/api';
 import {LearnerEmpty, LearnerLoading} from '../../components/LearnerStates';
@@ -125,6 +126,7 @@ export default function MentorHiring() {
           {mentors.filter(mentor => mentor.user !== user?.id).map(mentor => { const form = bookingForms[mentor.id] || {topic: '', duration: '1', when: ''}; return <article className="course-card" key={mentor.id}><div className="course-body">
             <span className="tag">{money(mentor.hourly_rate)} / hour</span>
             <h3>{mentor.mentor_name}</h3>
+            <p><Link href={`/instructors/${mentor.user}`} className="text-link">View full profile →</Link></p>
             <p className="muted">{mentor.qualifications}</p>
             <p><b>Expertise:</b> {mentor.topics}</p>
             {user?.role === 'learner' && <form onSubmit={event => book(event, mentor)}>
