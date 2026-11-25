@@ -42,7 +42,7 @@ def staff(user):
 
 
 def approved(user):
-    return bool(user and user.is_authenticated and user.is_active and user.is_verified and user.role == 'instructor' and user.instructor_approved)
+    return bool(user and user.is_authenticated and user.is_active and user.role == 'instructor' and user.instructor_approved)
 
 
 def require_editor(user, course):
@@ -171,13 +171,11 @@ class AuthView(APIView):
             try:
                 with transaction.atomic():
                     user = serializer.save()
-                    token = EmailToken.objects.create(user=user, kind='verify', expires_at=timezone.now()+timedelta(days=2))
-                    send_account_email(user, 'verify', token)
             except IntegrityError:
                 raise ValidationError('Registration could not be completed for this address.')
-            except Exception:
-                return Response({'detail': 'Verification mail could not be sent. Please try again later.'}, status=503)
-            return Response({'detail': 'Registered. Open the verification link sent to your email.'}, status=201)
+            # Email verification is disabled: accounts are usable immediately,
+            # no verification token is created and no verification email is sent.
+            return Response({'detail': 'Registered. You can sign in now.'}, status=201)
         if action != 'login':
             return Response(status=405)
         email = str(request.data.get('email', '')).strip().lower()
@@ -192,14 +190,14 @@ class AuthView(APIView):
             if any(item.locked_until and item.locked_until > now for item in (account, source)):
                 return Response({'detail': 'Too many attempts. Try again later.'}, status=429)
             user = authenticate(request, email=email, password=password)
-            valid = bool(user and user.is_active and user.is_verified and (user.role != 'instructor' or user.instructor_approved))
+            valid = bool(user and user.is_active and (user.role != 'instructor' or user.instructor_approved))
             if not valid:
                 for item, threshold in ((account, 5), (source, 30)):
                     item.failures += 1
                     if item.failures >= threshold:
                         item.locked_until = now + timedelta(minutes=15)
                     item.save(update_fields=['failures', 'locked_until', 'updated_at'])
-                return Response({'detail': 'Invalid credentials or account is not available. Check your verification email if you recently registered.'}, status=400)
+                return Response({'detail': 'Invalid credentials or account is not available.'}, status=400)
             account.failures = 0
             account.locked_until = None
             account.save(update_fields=['failures', 'locked_until', 'updated_at'])
@@ -259,17 +257,12 @@ class ChangePasswordView(APIView):
 
 
 class VerifyView(APIView):
+    # Email verification is disabled: accounts are usable immediately.
+    # Kept so old verification links fail cleanly instead of 404ing.
     permission_classes = [AllowAny]
 
     def get(self, request, token):
-        with transaction.atomic():
-            record = EmailToken.objects.select_for_update().filter(token=token, kind='verify', used_at__isnull=True, expires_at__gt=timezone.now()).first()
-            if not record:
-                return Response({'detail': 'Invalid, expired, or already used verification link.'}, status=400)
-            User.objects.filter(pk=record.user_id).update(is_verified=True)
-            record.used_at = timezone.now()
-            record.save(update_fields=['used_at'])
-        return Response({'detail': 'Email verified.'})
+        return Response({'detail': 'Email verification is disabled. You can sign in directly.'})
 
 
 class ResendVerificationSerializer(serializers.Serializer):
@@ -278,34 +271,12 @@ class ResendVerificationSerializer(serializers.Serializer):
 
 @method_decorator(csrf_protect, name='dispatch')
 class ResendVerificationView(APIView):
+    # Email verification is disabled: no verification email is ever sent.
+    # Kept so old links/forms fail cleanly instead of 404ing.
     permission_classes = [AllowAny]
-    generic_detail = 'If the account is eligible, a verification link was sent.'
+    generic_detail = 'Email verification is disabled. You can sign in directly.'
 
     def post(self, request):
-        require_object_body(request)
-        if throttle_action(request, 'resend-verification', 10):
-            return Response({'detail': self.generic_detail}, status=429)
-        serializer = ResendVerificationSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        email = serializer.validated_data['email'].lower()
-        try:
-            with transaction.atomic():
-                user = User.objects.select_for_update().filter(email=email).first()
-                if not user or not user.is_active or user.is_verified:
-                    return Response({'detail': self.generic_detail})
-                if user_action_throttled(user, 'resend-verification'):
-                    return Response({'detail': self.generic_detail})
-                now = timezone.now()
-                EmailToken.objects.filter(
-                    user=user, kind='verify', used_at__isnull=True,
-                ).update(used_at=now)
-                token = EmailToken.objects.create(
-                    user=user, kind='verify', expires_at=now + timedelta(days=2),
-                )
-                send_account_email(user, 'verify', token)
-        except Exception:
-            # Do not expose delivery details, token values, or account identity.
-            logger.warning('Verification mail delivery failed')
         return Response({'detail': self.generic_detail})
 
 
@@ -1282,7 +1253,7 @@ class LeaderboardView(APIView):
     permission_classes = [Verified]
 
     def get(self, request):
-        return Response([{'id': user.id, 'full_name': user.full_name, 'points': user.points, 'streak': user.current_streak} for user in User.objects.filter(is_active=True, is_verified=True, role='learner').order_by('-points', '-current_streak', 'id')[:100]])
+        return Response([{'id': user.id, 'full_name': user.full_name, 'points': user.points, 'streak': user.current_streak} for user in User.objects.filter(is_active=True, role='learner').order_by('-points', '-current_streak', 'id')[:100]])
 
 
 class HealthView(APIView):
