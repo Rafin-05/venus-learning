@@ -56,7 +56,7 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, data):
-        return User.objects.create_user(**data, is_verified=False, instructor_approved=False)
+        return User.objects.create_user(**data, is_verified=True, instructor_approved=False)
 
 
 class PublicInstructorSerializer(serializers.ModelSerializer):
