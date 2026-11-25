@@ -1,10 +1,13 @@
 from rest_framework.permissions import BasePermission
 
 class Verified(BasePermission):
-    message = 'An active, verified account is required; instructors also need approval.'
+    # Email verification is disabled: an active account is enough.
+    # Instructors still need administrator approval. The class name is
+    # kept so every existing viewset keeps working unchanged.
+    message = 'An active account is required; instructors also need approval.'
     def has_permission(self, request, view):
         user = request.user
-        return bool(user and user.is_authenticated and user.is_active and user.is_verified and (user.role != 'instructor' or user.instructor_approved))
+        return bool(user and user.is_authenticated and user.is_active and (user.role != 'instructor' or user.instructor_approved))
 
 class EditorOnly(Verified):
     message = 'Only an approved instructor or administrator can edit learning content.'
