@@ -24,7 +24,7 @@ def safe_url(value):
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'full_name', 'role', 'bio', 'expertise', 'profile_pic', 'current_streak', 'points', 'is_verified', 'instructor_approved', 'is_active')
+        fields = ('id', 'email', 'full_name', 'role', 'title', 'bio', 'expertise', 'profile_pic', 'current_streak', 'points', 'is_verified', 'instructor_approved', 'is_active')
         read_only_fields = ('id', 'email', 'role', 'current_streak', 'points', 'is_verified', 'instructor_approved', 'is_active')
 
     def validate_profile_pic(self, value):
@@ -62,7 +62,7 @@ class RegisterSerializer(serializers.Serializer):
 class PublicInstructorSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'full_name', 'bio', 'expertise', 'profile_pic')
+        fields = ('id', 'full_name', 'title', 'bio', 'expertise', 'profile_pic')
 
 
 class CourseSerializer(serializers.ModelSerializer):

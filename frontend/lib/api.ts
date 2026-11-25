@@ -1,6 +1,23 @@
 export type User = {
-  id: number; email: string; full_name: string; role: string;
-  bio?: string; expertise?: string; profile_pic?: string; is_verified: boolean; current_streak: number;
+  id: number; email: string; full_name: string; role: string; title?: string;
+  bio?: string; expertise?: string; profile_pic?: string; is_verified: boolean; current_streak: number; points?: number;
+};
+export type EnrollmentItem = {id: number; course: Course; progress_percent: number; enrolled_at: string; completed_at?: string | null};
+export type CertificateItem = {id: number; course: Course; certificate_no: string; issued_at: string};
+export type MentorSessionItem = {id: number; student: number; student_name: string; mentor: number; mentor_name: string; topic: string; duration_hours: number; hourly_rate: string | number; total_fee: string | number; scheduled_at: string; meet_link?: string; status: string; payment_status: string};
+export type MentorProfileItem = {id: number; user: number; mentor_name: string; mentor_email: string; qualifications: string; topics: string; hourly_rate: string | number; is_available: boolean};
+export type ProfileSummary = {
+  user: User;
+  enrollments?: EnrollmentItem[]; certificates?: CertificateItem[];
+  courses?: Course[]; students?: number; average_rating?: number | null; reviews?: number;
+  mentor_profile?: MentorProfileItem | null; sessions_completed?: number;
+  upcoming_sessions?: MentorSessionItem[];
+  users?: number; pending_courses?: number; issues?: number;
+};
+export type InstructorProfile = {
+  user: {id: number; full_name: string; title?: string; bio?: string; expertise?: string; profile_pic?: string};
+  courses: Course[]; students: number; average_rating?: number | null; reviews: number;
+  mentor_profile?: MentorProfileItem | null; sessions_completed: number;
 };
 export type Course = {
   id: number; title: string; subtitle?: string; description: string; category: string; subcategory?: string;

@@ -14,7 +14,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.mail import send_mail
 from django.db import IntegrityError, connection, transaction
-from django.db.models import F, Q
+from django.db.models import Avg, F, Q
+from django.shortcuts import get_object_or_404
 from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -27,6 +28,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .asset_models import UploadedAsset
+from .mentor_models import MentorProfile, MentorSession
+from .mentor_serializers import MentorProfileSerializer, MentorSessionSerializer
 from .models import *
 from .publishing import published_courses, course_is_published
 from .permissions import Verified, EditorOnly, StaffOnly
@@ -229,11 +232,68 @@ class MeView(APIView):
         require_object_body(request)
         forbidden = {'email', 'role', 'is_staff', 'is_superuser', 'is_verified', 'instructor_approved', 'is_active', 'points', 'current_streak', 'password'}
         if forbidden.intersection(request.data):
-            raise ValidationError('Only name, biography, expertise, and profile image can be edited here.')
+            raise ValidationError('Only name, title, biography, expertise, and profile image can be edited here.')
         serializer = UserSerializer(request.user, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class ProfileSummaryView(APIView):
+    """Role-aware data for the signed-in user's profile view.
+
+    Learners get enrollments with progress, certificates and upcoming
+    mentor sessions; instructors get their courses, student totals,
+    average rating and mentor profile; admins get site counts.
+    """
+    permission_classes = [Verified]
+
+    def get(self, request):
+        user = request.user
+        data = {'user': UserSerializer(user).data}
+        now = timezone.now()
+        if staff(user):
+            data.update({'users': User.objects.count(), 'courses': Course.objects.count(), 'pending_courses': Course.objects.filter(status='pending').count(), 'issues': SupportTicket.objects.filter(status='open').count()})
+            return Response(data)
+        if approved(user):
+            courses = Course.objects.filter(instructor=user)
+            mentor = MentorProfile.objects.filter(user=user).first()
+            data.update({
+                'courses': CourseSerializer(courses, many=True).data,
+                'students': Enrollment.objects.filter(course__instructor=user).values('learner').distinct().count(),
+                'average_rating': Rating.objects.filter(course__instructor=user).aggregate(avg=Avg('rating'))['avg'],
+                'reviews': Rating.objects.filter(course__instructor=user).count(),
+                'mentor_profile': MentorProfileSerializer(mentor).data if mentor else None,
+                'sessions_completed': MentorSession.objects.filter(mentor=user, status='completed').count(),
+                'upcoming_sessions': MentorSessionSerializer(MentorSession.objects.filter(mentor=user, status__in=('pending', 'confirmed'), scheduled_at__gte=now).order_by('scheduled_at'), many=True).data,
+            })
+            return Response(data)
+        data.update({
+            'enrollments': EnrollmentSerializer(Enrollment.objects.filter(learner=user).select_related('course'), many=True).data,
+            'certificates': CertificateSerializer(Certificate.objects.filter(learner=user).select_related('course'), many=True).data,
+            'upcoming_sessions': MentorSessionSerializer(MentorSession.objects.filter(student=user, status__in=('pending', 'confirmed'), scheduled_at__gte=now).order_by('scheduled_at'), many=True).data,
+        })
+        return Response(data)
+
+
+class InstructorProfileView(APIView):
+    """Public profile for one approved instructor: who they are, what they
+    teach, how learners rated them, and their mentor offer."""
+    permission_classes = [Verified]
+
+    def get(self, request, user_id):
+        instructor = get_object_or_404(User, id=user_id, role='instructor', instructor_approved=True)
+        courses = Course.objects.filter(instructor=instructor, status='approved')
+        mentor = MentorProfile.objects.filter(user=instructor).first()
+        return Response({
+            'user': PublicInstructorSerializer(instructor).data,
+            'courses': CourseSerializer(courses, many=True).data,
+            'students': Enrollment.objects.filter(course__instructor=instructor).values('learner').distinct().count(),
+            'average_rating': Rating.objects.filter(course__instructor=instructor).aggregate(avg=Avg('rating'))['avg'],
+            'reviews': Rating.objects.filter(course__instructor=instructor).count(),
+            'mentor_profile': MentorProfileSerializer(mentor).data if mentor else None,
+            'sessions_completed': MentorSession.objects.filter(mentor=instructor, status='completed').count(),
+        })
 
 
 class ChangePasswordView(APIView):
