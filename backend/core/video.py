@@ -63,7 +63,12 @@ def is_youtube_url(value):
 
 
 def youtube_embed_url(video_id):
-    """Privacy-enhanced embed URL for a validated YouTube video ID."""
+    """Privacy-enhanced embed URL for a validated YouTube video ID.
+
+    ``enablejsapi=1`` is required: without it the YouTube IFrame API
+    cannot attach to the embed, so the learning page never receives
+    play/pause events and watched progress stays at 0%.
+    """
     if not video_id or not _YOUTUBE_ID.match(str(video_id)):
         return ''
-    return f'https://www.youtube-nocookie.com/embed/{video_id}'
+    return f'https://www.youtube-nocookie.com/embed/{video_id}?enablejsapi=1'
