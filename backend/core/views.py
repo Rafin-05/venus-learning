@@ -45,7 +45,7 @@ def staff(user):
 
 
 def approved(user):
-    return bool(user and user.is_authenticated and user.is_active and user.role == 'instructor' and user.instructor_approved)
+    return bool(user and user.is_authenticated and user.is_active and user.role == 'instructor')
 
 
 def require_editor(user, course):
@@ -193,7 +193,7 @@ class AuthView(APIView):
             if any(item.locked_until and item.locked_until > now for item in (account, source)):
                 return Response({'detail': 'Too many attempts. Try again later.'}, status=429)
             user = authenticate(request, email=email, password=password)
-            valid = bool(user and user.is_active and (user.role != 'instructor' or user.instructor_approved))
+            valid = bool(user and user.is_active)
             if not valid:
                 for item, threshold in ((account, 5), (source, 30)):
                     item.failures += 1
@@ -277,12 +277,12 @@ class ProfileSummaryView(APIView):
 
 
 class InstructorProfileView(APIView):
-    """Public profile for one approved instructor: who they are, what they
+    """Public profile for one instructor: who they are, what they
     teach, how learners rated them, and their mentor offer."""
     permission_classes = [Verified]
 
     def get(self, request, user_id):
-        instructor = get_object_or_404(User, id=user_id, role='instructor', instructor_approved=True)
+        instructor = get_object_or_404(User, id=user_id, role='instructor')
         courses = Course.objects.filter(instructor=instructor, status='approved')
         mentor = MentorProfile.objects.filter(user=instructor).first()
         return Response({
@@ -410,7 +410,7 @@ class CourseViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         if not (approved(self.request.user) or staff(self.request.user)):
-            raise PermissionDenied('Approved instructors only.')
+            raise PermissionDenied('Instructors only.')
         serializer.save(instructor=self.request.user, status='pending')
         attach_thumbnail_asset(serializer.instance, self.request.user)
 

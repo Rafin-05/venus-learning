@@ -49,7 +49,7 @@ class ProctoredExamViewSet(viewsets.ModelViewSet):
         ).prefetch_related("events").order_by("-started_at", "-id")
         if staff(user):
             return queryset
-        if user.role == "instructor" and user.instructor_approved:
+        if user.role == "instructor":
             return queryset.filter(quiz__course__instructor=user)
         return queryset.filter(learner=user)
 
@@ -155,7 +155,7 @@ def proctor_session_or_404(session_id, user):
     """Helper for reuse by other views: same scoping as the viewset."""
     if staff(user):
         return get_object_or_404(ProctoredExamSession, pk=session_id)
-    if user.role == "instructor" and user.instructor_approved:
+    if user.role == "instructor":
         return get_object_or_404(
             ProctoredExamSession, pk=session_id, quiz__course__instructor=user
         )

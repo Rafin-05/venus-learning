@@ -55,7 +55,7 @@ class AssetWorkflowTests(APITestCase):
         with asset.file.open('rb') as file:
             self.assertNotIn(b'untrusted-metadata', file.read())
 
-    def test_private_pdf_requires_enrollment_and_current_publisher_approval(self):
+    def test_private_pdf_requires_enrollment(self):
         self.client.force_authenticate(self.instructor)
         response = self.client.post('/api/uploads/', {'purpose':'document', 'course':self.course.id, 'file':SimpleUploadedFile('lesson.pdf', b'%PDF-1.7 test fixture', content_type='application/pdf')})
         self.assertEqual(response.status_code, 201)
@@ -68,8 +68,7 @@ class AssetWorkflowTests(APITestCase):
         self.assertIn('attachment', result['Content-Disposition'])
         self.assertEqual(result['X-Content-Type-Options'], 'nosniff')
         self.assertIn('no-store', result['Cache-Control']); b''.join(result.streaming_content)
-        self.instructor.instructor_approved = False; self.instructor.save(update_fields=['instructor_approved'])
-        self.assertIn(self.client.get(response.data['url']).status_code, (403, 404))
+        self.assertEqual(self.client.get(response.data['url']).status_code, 200)
 
     def test_upload_permissions_and_invalid_course_are_controlled(self):
         self.assertIn(self.client.post('/api/uploads/', {'purpose':'avatar', 'file':self.image()}).status_code, (401, 403))

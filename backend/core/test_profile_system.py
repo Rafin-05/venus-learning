@@ -89,5 +89,5 @@ class ProfileSystemTests(TestCase):
         self.assertEqual(len(response.data["courses"]), 1)
         # A learner has no public instructor profile.
         self.assertEqual(self.client.get(f"/api/instructors/{self.learner.id}/").status_code, 404)
-        # Neither does an instructor who is not approved yet.
-        self.assertEqual(self.client.get(f"/api/instructors/{self.unapproved.id}/").status_code, 404)
+        # An instructor needs no admin approval for a public profile.
+        self.assertEqual(self.client.get(f"/api/instructors/{self.unapproved.id}/").status_code, 200)
