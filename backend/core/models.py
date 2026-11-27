@@ -64,6 +64,14 @@ class LessonProgress(models.Model):
 class Certificate(models.Model):
     learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='certificates'); course=models.ForeignKey(Course,on_delete=models.CASCADE); issued_at=models.DateTimeField(auto_now_add=True); certificate_no=models.UUIDField(default=uuid.uuid4,unique=True)
     class Meta: constraints=[models.UniqueConstraint(fields=['learner','course'],name='unique_certificate')]
+class FocusSession(models.Model):
+    """Deep Focus session: a learner watches course videos without
+    switching tabs for 30 or 60 minutes. Completing the benchmark
+    earns a badge (30- or 60-minute); switching tabs, minimizing or
+    closing ends the session with no badge. No points are involved."""
+    TARGETS=((30,'30 minutes'),(60,'60 minutes')); STATUSES=(('active','Active'),('completed','Completed'),('interrupted','Interrupted'))
+    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='focus_sessions'); target_minutes=models.PositiveSmallIntegerField(choices=TARGETS); started_at=models.DateTimeField(auto_now_add=True); ended_at=models.DateTimeField(null=True,blank=True); focused_seconds=models.PositiveIntegerField(default=0); status=models.CharField(max_length=20,choices=STATUSES,default='active')
+    class Meta: ordering=['-started_at','-id']
 class Quiz(models.Model):
     course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='quizzes'); lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='quizzes'); title=models.CharField(max_length=200); owner=models.ForeignKey(User,on_delete=models.CASCADE); pass_percentage=models.PositiveSmallIntegerField(default=70)
     time_limit_minutes=models.PositiveIntegerField(null=True,blank=True); attempts_allowed=models.PositiveIntegerField(null=True,blank=True); shuffle_questions=models.BooleanField(default=False); shuffle_options=models.BooleanField(default=False); show_answers=models.CharField(max_length=20,default='after_review',choices=(('immediate','Immediately'),('after_review','After review'),('never','Never')))
