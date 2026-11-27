@@ -8,9 +8,11 @@ export type MentorSessionItem = {id: number; student: number; student_name: stri
 export type ProctorEventItem = {id: number; session: number; event_type: string; severity: string; detail?: Record<string, unknown>; created_at: string};
 export type ProctoredSessionItem = {id: number; learner: number; learner_name: string; quiz: number; quiz_title: string; course: number; course_title: string; quiz_attempt?: number | null; status: string; consent_given: boolean; consent_at?: string | null; started_at: string; ended_at?: string | null; risk_score: number; risk_band: string; event_count: number; events: ProctorEventItem[]; review_note?: string; reviewed_by?: number | null; reviewed_at?: string | null};
 export type MentorProfileItem = {id: number; user: number; mentor_name: string; mentor_email: string; qualifications: string; topics: string; hourly_rate: string | number; is_available: boolean};
+export type FocusBadge = {target_minutes: 30 | 60; count: number};
+export type FocusSession = {id: number; target_minutes: 30 | 60; started_at: string; ended_at?: string | null; focused_seconds: number; status: string; badge?: FocusBadge};
 export type ProfileSummary = {
   user: User;
-  enrollments?: EnrollmentItem[]; certificates?: CertificateItem[];
+  enrollments?: EnrollmentItem[]; certificates?: CertificateItem[]; focus_badges?: FocusBadge[];
   courses?: Course[]; students?: number; average_rating?: number | null; reviews?: number;
   mentor_profile?: MentorProfileItem | null; sessions_completed?: number;
   upcoming_sessions?: MentorSessionItem[];
@@ -99,3 +101,11 @@ export const list = (data: any): any[] => Array.isArray(data) ? data : data?.res
 export const all = async <T = any>(path: string): Promise<T[]> => list(await api(path)) as T[];
 export const post = <T = any>(path: string, body: unknown) => api<T>(path, { method: 'POST', body: JSON.stringify(body) });
 export const patch = <T = any>(path: string, body: unknown) => api<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
+
+// Deep Focus: 30 or 60 minutes of video watching without switching tabs.
+// Completing the benchmark earns a badge (counted per length); switching
+// tabs ends the session with no badge. No points are involved.
+export const startFocusSession = (target_minutes: 30 | 60) => post<FocusSession>('/focus-sessions/start/', {target_minutes});
+export const heartbeatFocusSession = (id: number, focused_seconds: number) => post<FocusSession>(`/focus-sessions/${id}/heartbeat/`, {focused_seconds});
+export const endFocusSession = (id: number, reason: 'interrupted' | 'completed') => post<FocusSession>(`/focus-sessions/${id}/end/`, {reason});
+export const getFocusBadges = () => api<FocusBadge[]>('/focus-sessions/badges/');

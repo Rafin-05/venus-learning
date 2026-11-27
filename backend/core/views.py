@@ -20,7 +20,7 @@ from django.middleware.csrf import get_token
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_protect
-from rest_framework import serializers, viewsets
+from rest_framework import mixins, serializers, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import AllowAny
@@ -271,6 +271,7 @@ class ProfileSummaryView(APIView):
         data.update({
             'enrollments': EnrollmentSerializer(Enrollment.objects.filter(learner=user).select_related('course'), many=True).data,
             'certificates': CertificateSerializer(Certificate.objects.filter(learner=user).select_related('course'), many=True).data,
+            'focus_badges': focus_badges_for(user),
             'upcoming_sessions': MentorSessionSerializer(MentorSession.objects.filter(student=user, status__in=('pending', 'confirmed'), scheduled_at__gte=now).order_by('scheduled_at'), many=True).data,
         })
         return Response(data)
@@ -715,6 +716,100 @@ class CertificateViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return Certificate.objects.filter(learner=self.request.user).select_related('course__instructor', 'learner').order_by('-issued_at', '-id')
+
+
+def focus_badges_for(user):
+    """Completed Deep Focus sessions per length, 30 then 60; only
+    lengths with at least one completed session. Badges are a
+    website-only record — they never appear on a certificate."""
+    badges = []
+    for target in (30, 60):
+        count = FocusSession.objects.filter(learner=user, status='completed', target_minutes=target).count()
+        if count:
+            badges.append({'target_minutes': target, 'count': count})
+    return badges
+
+
+class FocusSessionViewSet(viewsets.GenericViewSet, mixins.ListModelMixin, mixins.RetrieveModelMixin):
+    """Deep Focus sessions: a learner watches course videos without
+    switching tabs for 30 or 60 minutes. Completing the benchmark
+    earns a badge (counted per length); switching tabs, minimizing or
+    closing ends the session with no badge. The server trusts the
+    frontend-reported focused_seconds (monotonic and capped) — this
+    is a self-discipline feature, not proctoring."""
+    serializer_class = FocusSessionSerializer
+    permission_classes = [Verified]
+
+    def get_queryset(self):
+        return FocusSession.objects.filter(learner=self.request.user)
+
+    def get_object(self):
+        # A learner must never see or touch another learner's session.
+        session = get_object_or_404(FocusSession, pk=self.kwargs['pk'])
+        if session.learner_id != self.request.user.id:
+            raise PermissionDenied('This focus session belongs to another learner.')
+        return session
+
+    @action(detail=False, methods=['post'])
+    def start(self, request):
+        if request.user.role != 'learner':
+            raise PermissionDenied('Only learners can start a focus session.')
+        require_object_body(request)
+        target = request.data.get('target_minutes')
+        if target not in (30, 60):
+            raise ValidationError({'target_minutes': 'Choose 30 or 60 minutes.'})
+        if FocusSession.objects.filter(learner=request.user, status='active').exists():
+            raise ValidationError({'detail': 'You already have an active focus session.'})
+        session = FocusSession.objects.create(learner=request.user, target_minutes=target)
+        return Response(FocusSessionSerializer(session).data, status=201)
+
+    @action(detail=True, methods=['post'])
+    def heartbeat(self, request, pk=None):
+        session = self.get_object()
+        if session.status != 'active':
+            raise ValidationError({'detail': 'This focus session has already ended.'})
+        require_object_body(request)
+        try:
+            value = int(request.data.get('focused_seconds', 0))
+        except (TypeError, ValueError):
+            raise ValidationError({'focused_seconds': 'focused_seconds must be a number of seconds.'})
+        target_seconds = session.target_minutes * 60
+        session.focused_seconds = max(session.focused_seconds, min(value, target_seconds))
+        if session.focused_seconds >= target_seconds:
+            session.status = 'completed'
+            session.ended_at = timezone.now()
+        session.save(update_fields=['focused_seconds', 'status', 'ended_at'])
+        data = FocusSessionSerializer(session).data
+        if session.status == 'completed':
+            data['badge'] = {'target_minutes': session.target_minutes, 'count': FocusSession.objects.filter(learner=request.user, status='completed', target_minutes=session.target_minutes).count()}
+        return Response(data)
+
+    @action(detail=True, methods=['post'])
+    def end(self, request, pk=None):
+        session = self.get_object()
+        if session.status != 'active':
+            raise ValidationError({'detail': 'This focus session has already ended.'})
+        require_object_body(request)
+        reason = request.data.get('reason')
+        if reason == 'interrupted':
+            session.status = 'interrupted'
+            session.ended_at = timezone.now()
+            session.save(update_fields=['status', 'ended_at'])
+            return Response(FocusSessionSerializer(session).data)
+        if reason == 'completed':
+            if session.focused_seconds < session.target_minutes * 60:
+                raise ValidationError({'detail': 'The focus benchmark has not been reached yet.'})
+            session.status = 'completed'
+            session.ended_at = timezone.now()
+            session.save(update_fields=['status', 'ended_at'])
+            data = FocusSessionSerializer(session).data
+            data['badge'] = {'target_minutes': session.target_minutes, 'count': FocusSession.objects.filter(learner=request.user, status='completed', target_minutes=session.target_minutes).count()}
+            return Response(data)
+        raise ValidationError({'reason': 'reason must be interrupted or completed.'})
+
+    @action(detail=False, methods=['get'])
+    def badges(self, request):
+        return Response(focus_badges_for(request.user))
 
 
 class CourseResourceViewSet(viewsets.ModelViewSet):

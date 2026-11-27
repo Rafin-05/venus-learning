@@ -276,6 +276,13 @@ class CertificateSerializer(serializers.ModelSerializer):
         fields = ('id', 'course', 'learner', 'learner_name', 'issued_at', 'certificate_no')
 
 
+class FocusSessionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = FocusSession
+        fields = ('id', 'target_minutes', 'started_at', 'ended_at', 'focused_seconds', 'status')
+        read_only_fields = ('id', 'started_at', 'ended_at', 'focused_seconds', 'status')
+
+
 class RatingSerializer(serializers.ModelSerializer):
     learner_name = serializers.CharField(source='learner.full_name', read_only=True)
 

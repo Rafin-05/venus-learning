@@ -58,6 +58,7 @@ export default function Profile() {
   const isAdmin = user?.role === 'admin';
   const enrollments = summary?.enrollments || [];
   const certificates = summary?.certificates || [];
+  const focusBadges = summary?.focus_badges || [];
   const courses = summary?.courses || [];
   const upcoming = summary?.upcoming_sessions || [];
 
@@ -112,9 +113,10 @@ export default function Profile() {
           {!enrollments.some(x => x.progress_percent < 100) && <LearnerEmpty>{enrollments.length ? 'All your courses are complete.' : 'You have not enrolled in a course yet.'} <Link href="/courses" className="text-link">Explore courses →</Link></LearnerEmpty>}
         </div>
         <div className="panel">
-          <div className="panel-head"><h2>Certificates</h2><Link href="/certificates">View all</Link></div>
+          <div className="panel-head"><h2>Certificates & Badges</h2><Link href="/certificates">View all</Link></div>
           {certificates.slice(0, 4).map(cert => <div className="activity-row" key={cert.id}><i>✓</i><span><b>{cert.course.title}</b><small>Issued {localTime(cert.issued_at)} · {cert.certificate_no}</small></span></div>)}
-          {!certificates.length && <LearnerEmpty>No certificates yet. Finish a course to earn one.</LearnerEmpty>}
+          {focusBadges.map(badge => <div className="activity-row" key={`focus-${badge.target_minutes}`}><i>★</i><span><b>{badge.target_minutes}-minute Deep Focus{badge.count > 1 ? ` ×${badge.count}` : ''}</b><small>{badge.count > 1 ? `${badge.count} completed focus sessions` : 'Completed focus session'}</small></span></div>)}
+          {!certificates.length && !focusBadges.length && <LearnerEmpty>No certificates yet. Finish a course to earn one.</LearnerEmpty>}
           <div className="panel-head"><h2>Upcoming mentor sessions</h2><Link href="/mentor-hiring">Mentor hiring</Link></div>
           {upcoming.slice(0, 4).map(session => <div className="activity-row" key={session.id}><i>✦</i><span><b>{session.topic}</b> with {session.mentor_name}<small>{localTime(session.scheduled_at)} · {session.duration_hours}h · {session.status}</small></span></div>)}
           {!upcoming.length && <p className="muted">No mentor sessions booked. <Link href="/mentor-hiring" className="text-link">Browse mentors →</Link></p>}
