@@ -4,9 +4,9 @@ import {useRouter} from 'next/navigation';
 import Link from 'next/link';
 import {api, post, User} from '../lib/api';
 
-type Role = 'learner' | 'instructor';
+type Role = 'learner' | 'instructor' | 'admin';
 
-const LABEL: Record<Role, string> = {learner: 'Learner', instructor: 'Instructor'};
+const LABEL: Record<Role, string> = {learner: 'Learner', instructor: 'Instructor', admin: 'Admin'};
 
 export default function RoleLoginForm({role, eyebrow, title, subtitle, destination, otherHref, otherRole}: {
   role: Role;
