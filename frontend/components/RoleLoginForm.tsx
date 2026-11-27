@@ -62,7 +62,6 @@ export default function RoleLoginForm({role, eyebrow, title, subtitle, destinati
           <input id="role-login-password" type="password" autoComplete="current-password" required value={password} onChange={event => setPassword(event.target.value)} />
         </div>
         <p><Link href="/reset">Forgot password?</Link></p>
-        {role === 'instructor' && <p className="muted">Instructor accounts require administrator approval.</p>}
         <button className="btn btn-primary" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
         <p>Not a {LABEL[role].toLowerCase()}? <Link href={otherHref}>Sign in as {LABEL[otherRole].toLowerCase()}</Link></p>
         <p>New to Venus Learning? <Link href="/register">Create an account</Link></p>

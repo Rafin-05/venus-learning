@@ -12,7 +12,7 @@ def is_staff_user(user):
 
 
 def owns_course(user, course):
-    return bool(user and user.is_authenticated and (is_staff_user(user) or (user.role == 'instructor' and user.instructor_approved and course.instructor_id == user.id)))
+    return bool(user and user.is_authenticated and (is_staff_user(user) or (user.role == 'instructor' and course.instructor_id == user.id)))
 
 
 def safe_url(value):
@@ -56,7 +56,7 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def create(self, data):
-        return User.objects.create_user(**data, is_verified=True, instructor_approved=False)
+        return User.objects.create_user(**data, is_verified=True, instructor_approved=True)
 
 
 class PublicInstructorSerializer(serializers.ModelSerializer):

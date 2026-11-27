@@ -80,8 +80,9 @@ class CatalogAndAuthorizationTests(AcceptanceBase):
         self.assertEqual(r.data.get("status"), "pending")
         self.assert_denied(self.patch(f"/api/courses/{self.pending.id}/", {"title": "No"}, user=self.learner))
 
-    def test_unapproved_instructor_cannot_create_course(self):
-        self.assert_denied(self.post("/api/courses/", {"title": "X", "description": "x"}, user=self.pending_instructor))
+    def test_instructor_needs_no_admin_approval_to_create_course(self):
+        response = self.post("/api/courses/", {"title": "X", "description": "x"}, user=self.pending_instructor)
+        self.assertEqual(response.status_code, 201)
 
     def test_anonymous_and_learner_cannot_mutate_courses_units_lessons_quizzes_problems(self):
         cases = [
@@ -429,10 +430,13 @@ class HardeningTests(AcceptanceBase):
         self.assertEqual(self.learner.role, 'learner')
         self.assertEqual(self.learner.points, 0)
 
-    def test_unverified_blocked_and_unapproved_sessions_are_denied(self):
-        for user in (self.unverified, self.blocked, self.pending_instructor):
+    def test_only_blocked_sessions_are_denied(self):
+        # Verification is disabled and instructor approval is removed, so an
+        # active account is enough: unverified accounts and instructors
+        # without approval get in; only a blocked (inactive) account is denied.
+        for user, expected in ((self.unverified, 200), (self.blocked, 403), (self.pending_instructor, 200)):
             self.auth(user)
-            self.assertEqual(self.client.get('/api/auth/me/').status_code, 403)
+            self.assertEqual(self.client.get('/api/auth/me/').status_code, expected)
 
     def test_owner_can_retrieve_pending_full_curriculum(self):
         unit = Unit.objects.create(course=self.pending, title='Private unit')
@@ -505,7 +509,7 @@ class HardeningTests(AcceptanceBase):
 
 class PublicationAndPrizeTests(AcceptanceBase):
     def test_instructor_revocation_hides_catalog_enrollment_and_private_content(self):
-        for field in ('is_active', 'is_verified', 'instructor_approved'):
+        for field in ('is_active', 'is_verified'):
             with self.subTest(field=field):
                 setattr(self.instructor, field, False)
                 self.instructor.save(update_fields=[field])

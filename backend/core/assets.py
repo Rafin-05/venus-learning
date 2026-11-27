@@ -68,10 +68,9 @@ class AssetUploadView(APIView):
             # (UploadedAsset.course is nullable). It is linked to the course
             # by attach_thumbnail_asset() in views.py once the course is
             # created with this asset's URL as its thumbnail. Only staff or
-            # an approved instructor may do this; Verified already ensures
-            # an instructor is approved, and learners are refused here.
+            # an instructor may do this; learners are refused here.
             if not (staff(request.user) or request.user.role == 'instructor'):
-                raise PermissionDenied('Only an approved instructor or staff can upload a course thumbnail.')
+                raise PermissionDenied('Only an instructor or staff can upload a course thumbnail.')
         else:
             course_id = str(request.data.get('course', ''))
             if not course_id.isdigit():
@@ -79,7 +78,7 @@ class AssetUploadView(APIView):
             course = Course.objects.filter(pk=course_id).first()
             if not course:
                 raise ValidationError('Course not found.')
-            if not (staff(request.user) or (request.user.role == 'instructor' and request.user.instructor_approved and course.instructor_id == request.user.id)):
+            if not (staff(request.user) or (request.user.role == 'instructor' and course.instructor_id == request.user.id)):
                 raise PermissionDenied('Only the course instructor or staff can upload course assets.')
         if purpose in ('avatar', 'thumbnail'):
             file = canonical_image(upload)
