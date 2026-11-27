@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 import PortalShell from '../../../components/PortalShell';
 import { api, list, patch } from '../../../lib/api';
@@ -8,6 +9,7 @@ import { api, list, patch } from '../../../lib/api';
 type Course = { id: number; title: string; status: string; units?: unknown[] };
 
 export default function Courses() {
+  const router = useRouter();
   const [courses, setCourses] = useState<Course[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -21,7 +23,7 @@ export default function Courses() {
   useEffect(() => { void load(); }, [load]);
   async function submit(id: number) {
     setBusyId(id); setError('');
-    try { await patch(`/courses/${id}/`, { status: 'pending' }); await load(); }
+    try { await patch(`/courses/${id}/`, { status: 'pending' }); router.push(`/instructor/courses/${id}/review-submitted`); }
     catch (e) { setError(e instanceof Error ? e.message : 'Unable to submit this course.'); }
     finally { setBusyId(null); }
   }

@@ -1,6 +1,6 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import PortalShell from '../../../../components/PortalShell';
 import { api, list, patch, post } from '../../../../lib/api';
 import AssetUpload from '../../../../components/AssetUpload';
@@ -14,6 +14,7 @@ const assetIdFromUrl = (url: string) => url.match(/\/uploads\/([0-9a-f-]{36})\/c
 
 export default function CourseEditor() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const courseId = Number(id);
   const [c, setC] = useState<Course | null>(null);
   const [f, setF] = useState({ title: '', subtitle: '', description: '', category: '', subcategory: '', level: '', language: 'en', thumbnail: '', promo_video_url: '', outcomesText: '', target_audience: '', prerequisites: '', is_free: true, price: '0.00', enrollment_open: true, access_duration_days: '', completion_threshold: 90 });
@@ -85,8 +86,7 @@ export default function CourseEditor() {
     setBusy(true); setError(''); setNotice('');
     try {
       await post(`/courses/${courseId}/submit-review/`, {});
-      setNotice('Submitted for admin review.');
-      await load();
+      router.push(`/instructor/courses/${courseId}/review-submitted`);
     } catch (e) { fail(e, 'Unable to submit for review.'); } finally { setBusy(false); }
   }
 
