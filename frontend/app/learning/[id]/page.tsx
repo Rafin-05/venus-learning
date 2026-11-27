@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import {useParams} from 'next/navigation';
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
-import {api, all, list, patch, post} from '../../../lib/api';
+import {api, all, list, patch, post, endFocusSession, heartbeatFocusSession, startFocusSession, type FocusBadge, type FocusSession} from '../../../lib/api';
 import {LearnerError, LearnerEmpty, LearnerLoading} from '../../../components/LearnerStates';
 import AssetUpload from '../../../components/AssetUpload';
 
@@ -44,10 +44,24 @@ export default function Learning() {
   const [assignmentText,setAssignmentText] = useState<Record<number,string>>({});
   const [assignmentAsset,setAssignmentAsset] = useState<Record<number,string>>({});
   const [watched,setWatched] = useState(0);
+  const [focusSession,setFocusSession] = useState<FocusSession|null>(null);
+  const [focusPicker,setFocusPicker] = useState(false);
+  const [focusError,setFocusError] = useState('');
+  const [focusRemaining,setFocusRemaining] = useState(0);
+  const [focusConfirmEnd,setFocusConfirmEnd] = useState(false);
+  const [focusNotice,setFocusNotice] = useState('');
+  const [focusCongrats,setFocusCongrats] = useState<FocusBadge|null>(null);
   const [playerDuration,setPlayerDuration] = useState(0);
   const watchedRef = useRef<Set<number>>(new Set());
   const playerRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
+  const focusSessionRef = useRef<FocusSession|null>(null);
+  const focusCountRef = useRef(0);
+  const focusLastHeartbeatRef = useRef(0);
+  const focusIntervalRef = useRef<any>(null);
+  const focusPlayingRef = useRef(false);
+  const focusCsrfRef = useRef('');
+  const focusAutoPlayRef = useRef(false);
   const lessons = useMemo(() => units.flatMap(unit => unit.lessons || []),[units]);
   const selected = lessons.find(lesson => lesson.id === selectedId) || null;
   const load = useCallback(async () => {
@@ -81,10 +95,85 @@ export default function Learning() {
       return result;
     } catch { return null; }
   }, []);
+
+  // Deep Focus: 30 or 60 minutes of video watching without switching
+  // tabs. The timer only counts while the video is playing, carries
+  // across lessons, and ends with no badge the moment the tab is hidden.
+  const formatRemaining = (seconds:number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  const stopFocusTimer = useCallback(() => { if (focusIntervalRef.current) { clearInterval(focusIntervalRef.current); focusIntervalRef.current = null; } }, []);
+  const clearFocus = useCallback(() => { stopFocusTimer(); setFocusSession(null); setFocusPicker(false); setFocusConfirmEnd(false); }, [stopFocusTimer]);
+  useEffect(() => { focusSessionRef.current = focusSession; }, [focusSession]);
+  const sendFocusInterrupted = useCallback((sessionId:number) => {
+    // A keepalive request (not sendBeacon: Django needs the CSRF header)
+    // so the session still ends server-side when the tab closes.
+    const token = focusCsrfRef.current;
+    if (!token) return;
+    try { void fetch(`/api/focus-sessions/${sessionId}/end/`, {method:'POST', keepalive:true, credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRFToken':token}, body: JSON.stringify({reason:'interrupted'})}); } catch { /* the page is going away */ }
+  }, []);
+  async function startFocus(target:number) {
+    setFocusError(''); setFocusNotice('');
+    try {
+      const session = await startFocusSession(target as 30 | 60);
+      try { const tokenResponse = await fetch('/api/auth/csrf/', {credentials:'same-origin', cache:'no-store'}); const tokenData = await tokenResponse.json(); if (typeof tokenData.csrfToken === 'string') focusCsrfRef.current = tokenData.csrfToken; } catch { /* ending still works while the tab stays open */ }
+      focusCountRef.current = 0; focusLastHeartbeatRef.current = 0;
+      setFocusRemaining(session.target_minutes * 60);
+      setFocusSession(session); setFocusPicker(false);
+    } catch (err) { setFocusError(message(err)); }
+  }
+  async function endFocusNow() {
+    const session = focusSessionRef.current; if (!session) return;
+    try { await endFocusSession(session.id, 'interrupted'); } catch { /* the session is over either way */ }
+    clearFocus(); setFocusNotice('Focus session ended. No badge was earned.');
+  }
+  useEffect(() => {
+    if (!focusSession) return;
+    const targetSeconds = focusSession.target_minutes * 60;
+    focusIntervalRef.current = setInterval(() => {
+      if (!focusPlayingRef.current) return;
+      focusCountRef.current += 1;
+      const counted = focusCountRef.current;
+      setFocusRemaining(Math.max(0, targetSeconds - counted));
+      if (counted >= targetSeconds) {
+        stopFocusTimer();
+        const session = focusSessionRef.current;
+        if (!session) return;
+        void heartbeatFocusSession(session.id, targetSeconds).then(result => { if (result.badge) setFocusCongrats(result.badge); setFocusSession(null); }).catch(() => { setFocusSession(null); });
+        return;
+      }
+      if (counted % 15 === 0 && counted !== focusLastHeartbeatRef.current) {
+        focusLastHeartbeatRef.current = counted;
+        const session = focusSessionRef.current;
+        if (session) void heartbeatFocusSession(session.id, counted).catch(() => { /* retried on the next heartbeat */ });
+      }
+    }, 1000);
+    return () => stopFocusTimer();
+  }, [focusSession, stopFocusTimer]);
+  useEffect(() => {
+    const onVisibility = () => {
+      const session = focusSessionRef.current;
+      if (!session || !document.hidden) return;
+      try { if (playerRef.current) playerRef.current.pauseVideo(); } catch { /* player not ready */ }
+      sendFocusInterrupted(session.id);
+      focusSessionRef.current = null;
+      setFocusSession(null);
+      setFocusNotice('Focus session ended — you switched tabs, so no badge was earned.');
+    };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      const session = focusSessionRef.current;
+      if (!session) return;
+      sendFocusInterrupted(session.id);
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => { document.removeEventListener('visibilitychange', onVisibility); window.removeEventListener('beforeunload', onBeforeUnload); };
+  }, [sendFocusInterrupted]);
   useEffect(() => {
     if (!selected) return;
     let active = true;
     watchedRef.current = new Set();
+    focusPlayingRef.current = false;
     setWatched(0);
     setPlayerDuration(0);
     setPlayback(null);
@@ -101,10 +190,11 @@ export default function Learning() {
       const duration = playback.duration_seconds || selected.duration_seconds || 0;
       playerRef.current = new window.YT.Player('lesson-player', {
         events: {
-          onReady: (event:any) => { const resume = playback.resume_position_seconds || 0; if (resume > 0) event.target.seekTo(resume, true); },
+          onReady: (event:any) => { const resume = playback.resume_position_seconds || 0; if (resume > 0) event.target.seekTo(resume, true); if (focusAutoPlayRef.current) { focusAutoPlayRef.current = false; try { event.target.playVideo(); } catch { /* the learner presses play */ } } },
           onStateChange: (event:any) => {
             const YT = window.YT;
             if (event.data === YT.PlayerState.PLAYING) {
+              focusPlayingRef.current = true;
               if (timerRef.current) clearInterval(timerRef.current);
               timerRef.current = setInterval(() => {
                 try {
@@ -119,6 +209,7 @@ export default function Learning() {
                 } catch { /* player not ready */ }
               }, 1000);
             } else {
+              focusPlayingRef.current = false;
               if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
               if (event.data === YT.PlayerState.PAUSED || event.data === YT.PlayerState.ENDED) {
                 try {
@@ -128,6 +219,16 @@ export default function Learning() {
                   if (dur > 0) setPlayerDuration(dur);
                   void sendProgress(selected.id, { watched_seconds: watchedRef.current.size, duration_seconds: dur || undefined, resume_position_seconds: current });
                 } catch { /* ignore */ }
+                if (event.data === YT.PlayerState.ENDED) {
+                  // Deep Focus carries across videos: keep the session
+                  // running into the next lesson until the time is up.
+                  const focus = focusSessionRef.current;
+                  if (focus && focusCountRef.current < focus.target_minutes * 60) {
+                    const currentIndex = lessons.findIndex(lesson => lesson.id === selected.id);
+                    const next = lessons[currentIndex + 1];
+                    if (next) { focusAutoPlayRef.current = true; setSelectedId(next.id); }
+                  }
+                }
               }
             }
           },
@@ -197,13 +298,25 @@ export default function Learning() {
   const videoPct = videoDuration ? Math.min(100, Math.round(watched * 100 / videoDuration)) : (playback?.watch_percentage || selected?.watch_percentage || 0);
   return <main className="learn-page">
     <div className="learn-top"><Link href={`/courses/${id}`}>← Course overview</Link><span>{course.title}</span><b>{Object.values(progress).filter(value => value === 100).length} / {lessons.length} complete</b></div>
-    <div className="learn-layout"><aside className="lesson-nav"><h3>Course contents</h3>
+    <div className="learn-layout">{!focusSession && <aside className="lesson-nav"><h3>Course contents</h3>
       {units.map(unit => <div key={unit.id}><p className="muted">{unit.title}</p>{unit.lessons.map((lesson,number) => <button className={selectedId === lesson.id ? 'selected' : ''} onClick={() => setSelectedId(lesson.id)} key={lesson.id}><i>{progress[lesson.id] === 100 ? '✓' : number+1}</i>{lesson.title}<small>{progress[lesson.id] === 100 ? 'Complete' : lesson.lesson_type}</small></button>)}</div>)}
       <p><Link href="/certificates">Your certificates →</Link></p>
-    </aside><article className="lesson-content">{selected ? <>
+    </aside>}<article className="lesson-content">{selected ? <>
       <span className="tag">Lesson {index+1} · {selected.lesson_type}</span><h1>{selected.title}</h1>
       {selected.content && <p className="lead" style={{whiteSpace:'pre-wrap'}}>{selected.content}</p>}
       {embed ? <><iframe id="lesson-player" title={selected.title} src={embed} allow="fullscreen; encrypted-media; picture-in-picture" referrerPolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation" style={{width:'100%',aspectRatio:'16 / 9',border:0,borderRadius:14}} allowFullScreen/>{selected.lesson_type === 'video' && <p className="muted">Watched {videoPct}%{videoDuration ? ` · resumes where you left off` : ''} · complete at {playback?.completion_threshold ?? 90}% watched.</p>}</> : safeLink(selected.video_url) && <p><a href={safeLink(selected.video_url)} target="_blank" rel="noopener noreferrer" className="text-link">Open lesson video ↗</a></p>}
+      {selected.lesson_type === 'video' && <section className="panel" style={{padding:16,marginTop:16}}>
+        {focusSession ? <>
+          <div className="panel-head"><h2>Deep Focus · {focusSession.target_minutes}-minute session</h2><b>{formatRemaining(focusRemaining)} left</b></div>
+          <p className="muted">Stay on this tab until the timer ends — the timer only counts while the video is playing and carries across lessons. Switching tabs, minimizing or closing ends the session with no badge.</p>
+          {focusConfirmEnd ? <><p><b>End focus session?</b> You will not earn the badge.</p><button className="btn btn-primary" onClick={() => void endFocusNow()}>Yes, end session</button>{' '}<button className="btn btn-soft" onClick={() => setFocusConfirmEnd(false)}>Keep focusing</button></> : <button className="btn btn-soft" onClick={() => setFocusConfirmEnd(true)}>End session</button>}
+        </> : <>
+          <div className="panel-head"><h2>Deep Focus</h2></div>
+          {focusPicker ? <><p>Choose your focus time. The session carries across lessons until the time is up.</p><button className="btn btn-primary" onClick={() => void startFocus(30)}>30 minutes</button>{' '}<button className="btn btn-primary" onClick={() => void startFocus(60)}>60 minutes</button>{' '}<button className="btn btn-soft" onClick={() => setFocusPicker(false)}>Cancel</button></> : <><p className="muted">Watch without distractions for 30 or 60 minutes. Finish the benchmark to earn a badge.</p><button className="btn btn-soft" onClick={() => {setFocusError(''); setFocusPicker(true);}}>Deep Focus</button></>}
+          {focusError && <p className="form-error" role="alert">{focusError}</p>}
+        </>}
+      </section>}
+      {focusNotice && <p role="status" className="muted">{focusNotice}</p>}
       {safeLink(selected.document_url) && <p><a href={safeLink(selected.document_url)} target="_blank" rel="noopener noreferrer" className="text-link">Open lesson document ↗</a></p>}
       {selected.lesson_type === 'coding' ? <section className="panel" style={{padding:20,marginTop:20}}><h2>Practice this lesson</h2><div className="field"><label htmlFor="coding-language">Execution language</label><select id="coding-language" value={language} onChange={event => setLanguage(event.target.value)}><option value="71">Python 3</option><option value="63">JavaScript</option><option value="54">C++</option><option value="62">Java</option><option value="50">C</option><option value="60">Go</option><option value="73">Rust</option></select></div><div className="field"><label htmlFor="lesson-code">Source code</label><textarea id="lesson-code" rows={14} spellCheck={false} value={code} onChange={event => setCode(event.target.value)} style={{fontFamily:'monospace'}} maxLength={100000}/></div><button className="btn btn-primary" disabled={saving || !code.trim()} onClick={runCode}>{saving ? 'Running…' : 'Run and check solution'}</button><p className="muted">An isolated execution service must be configured. A server error never counts as a passed solution.</p>{runnerResult && <pre className="code-output" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{runnerResult}</pre>}</section> : <div className="lesson-actions"><button className="btn btn-soft" disabled={index <= 0} onClick={() => setSelectedId(lessons[index-1].id)}>← Previous</button><button className="btn btn-primary" disabled={saving} onClick={complete}>{saving ? 'Saving…' : 'Mark complete & continue →'}</button></div>}
       <p className="muted">Video progress is tracked from playback — paused time is not counted. Coding completion is awarded by the server after a passing execution.</p>
@@ -213,5 +326,13 @@ export default function Learning() {
     {resources.length > 0 && <section className="panel" style={{padding:24,marginTop:28}}><h2>Learning resources</h2>{resources.filter(r => !r.lesson || r.lesson === selected?.id).map(r => <p key={r.id}><a href={r.download_url} target="_blank" rel="noopener noreferrer" className="text-link">{r.title}</a>{r.description ? ` — ${r.description}` : ''}</p>)}</section>}
     {assignments.length > 0 && assignments.map(a => <section className="panel" style={{padding:24,marginTop:28}} key={a.id}><h2>{a.title}</h2><p>{a.instructions}</p><p className="muted">{a.max_points} points{a.due_at ? ` · due ${new Date(a.due_at).toLocaleString()}` : ''} · {a.accepted_types === 'file' ? 'file upload' : a.accepted_types === 'text' ? 'text response' : 'file or text'}</p>{a.accepted_types !== 'file' && <div className="field"><label htmlFor={`asg-text-${a.id}`}>Your response</label><textarea id={`asg-text-${a.id}`} rows={4} value={assignmentText[a.id] || ''} onChange={e => setAssignmentText(old => ({...old,[a.id]:e.target.value}))}/></div>}{a.accepted_types !== 'text' && <AssetUpload purpose="document" course={Number(id)} onUploaded={url => setAssignmentAsset(old => ({...old,[a.id]:url.match(/\/uploads\/([0-9a-f-]{36})\/content\//)?.[1] || ''}))} />}{assignmentAsset[a.id] && <p className="muted">File attached.</p>}<button className="btn btn-primary" disabled={saving} onClick={() => void submitAssignment(a)}>Submit assignment</button></section>)}
     </article></div>
+    {focusCongrats && <div role="dialog" aria-label="Deep Focus complete" style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,padding:20}}>
+      <div className="panel" style={{padding:32,maxWidth:480,textAlign:'center'}}>
+        <h2>Congratulations, you have completed your Deep Focus session</h2>
+        <p>You earned the <b>{focusCongrats.target_minutes}-minute Deep Focus badge</b>{focusCongrats.count > 1 ? ` — ×${focusCongrats.count} completed` : ''}.</p>
+        <p className="muted">Your badge is shown in Certificates &amp; Badges on your profile.</p>
+        <button className="btn btn-primary" onClick={() => setFocusCongrats(null)}>Continue learning</button>
+      </div>
+    </div>}
   </main>;
 }
