@@ -4,20 +4,20 @@ All paths below are relative to `/api/`. JSON lists use `{count,next,previous,re
 
 ## Accounts
 
-- `POST /auth/register/`: `{email,password,full_name,role}`; role is learner or instructor. Email format and password policy are validated. A one-use verification link expires after two days; instructors also need administrator approval.
+- `POST /auth/register/`: `{email,password,full_name,role}`; role is learner or instructor. Email format and password policy are validated. A one-use verification link expires after two days. Instructors need no administrator approval.
 - `POST /auth/resend-verification/`: `{email}`; CSRF-protected recovery for active, unverified accounts. Returns the same generic confirmation for valid email addresses regardless of account existence or eligibility. Source-IP limits and a per-account cooldown prevent repeated mail sends. Issued links expire after two days and replace previous unused verification links. Mail-provider failures preserve prior links and do not disclose account status. The user-facing form is `/resend-verification`.
 - `POST /auth/login/`: `{email,password}`; generic failure messages and database-backed account/source-IP lockouts. `POST /auth/logout/` ends the current session.
 - `GET/PATCH /auth/me/` or `/profile/`: read/edit safe profile fields. Role, email, privilege flags, counters, and verification state are not self-editable.
 - `GET /auth/verify/<uuid>/`; `POST /auth/password-reset/` with `{email}`; `POST /auth/password-reset/confirm/<uuid>/` with `{password}`. Reset links expire after one hour and cannot be replayed.
 - `POST /auth/change-password/`: `{current_password,new_password}`. Other sessions become invalid through Django's password/session hash, and the current API session is logged out.
 
-Protected routes require a currently active, verified account; instructors must remain approved. Staff promotion is an explicit CLI/maintenance-administration operation, not a general REST user patch.
+Protected routes require a currently active, verified account. Staff promotion is an explicit CLI/maintenance-administration operation, not a general REST user patch.
 
 Registration, login, resend verification, password change/reset, profile update, lesson progress, coding lesson execution, quiz/contest submission, and problem submission require an object request body. Top-level JSON arrays, strings, numbers, booleans, and null are rejected with HTTP 400 and `{"detail":"Request body must be a JSON object."}` rather than causing server errors. Authentication, authorization and CSRF checks still apply. Malformed coding request bodies are rejected before submission throttling or runner calls, including when the problem runner is not configured.
 
 ## Courses and learning
 
-Public `GET /courses/`, `/courses/<id>/`, `/courses/<id>/curriculum/`, and `/courses/<id>/reviews/` expose approved material only while its publisher remains active, verified, and approved. Public curriculum includes unit/lesson metadata, not private lesson bodies or answer keys. `?search=` and `?category=` filter the catalog; `?mine=1` selects an approved instructor's own draft/approved courses. Staff see moderation records.
+Public `GET /courses/`, `/courses/<id>/`, `/courses/<id>/curriculum/`, and `/courses/<id>/reviews/` expose approved material only while its publisher remains active and verified. Public curriculum includes unit/lesson metadata, not private lesson bodies or answer keys. `?search=` and `?category=` filter the catalog; `?mine=1` selects an instructor's own draft/approved courses. Staff see moderation records.
 
 Instructor-owner/staff CRUD uses `/courses/`, `/units/`, `/lessons/`, and `/quizzes/` (detail IDs for update/delete). Course changes by instructors require review. Course objects include `instructor_name`, `average_rating`, `student_count`, and `lesson_count`. `GET /courses/<id>/students/` is owner/staff-only.
 
@@ -47,7 +47,7 @@ Quiz writes include nested questions with `question,option_a,option_b,option_c,o
 
 ## Files
 
-`POST /uploads/` uses multipart `file,purpose,course` (`course` is omitted for avatars). Purposes are `avatar`, `thumbnail`, and `document`; course assets require the owning approved instructor or staff. Response: `{id,url,purpose}`. Files are at most 5 MiB. JPEG/PNG/WEBP images are dimension-bounded, decoded and re-encoded to PNG without original metadata. Documents must have a PDF signature and are attachment downloads, not inline HTML.
+`POST /uploads/` uses multipart `file,purpose,course` (`course` is omitted for avatars). Purposes are `avatar`, `thumbnail`, and `document`; course assets require the owning instructor or staff. Response: `{id,url,purpose}`. Files are at most 5 MiB. JPEG/PNG/WEBP images are dimension-bounded, decoded and re-encoded to PNG without original metadata. Documents must have a PDF signature and are attachment downloads, not inline HTML.
 
 `GET /uploads/<uuid>/content/` authorizes access. Active verified avatars and currently approved course thumbnails can be public; documents require owner/staff or an active verified learner enrolled in the published course. Direct `/media/` is blocked by Nginx. Changing an instructor thumbnail returns the course to pending review.
 
