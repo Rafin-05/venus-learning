@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .assets import AssetUploadView, AssetContentView
 from .finance_views import FinanceViewSet
 from .mentor_views import MentorOfferViewSet, MentorProfileViewSet, MentorSessionViewSet, SessionRatingViewSet, SessionRequestViewSet
+from .proctor_views import ProctoredExamViewSet
 from .views import *
 router=DefaultRouter()
 router.register('courses',CourseViewSet,basename='course')
@@ -30,5 +31,6 @@ router.register('mentor-hiring/requests',SessionRequestViewSet,basename='session
 router.register('mentor-hiring/offers',MentorOfferViewSet,basename='mentor-offer')
 router.register('mentor-hiring/bookings',MentorSessionViewSet,basename='mentor-booking')
 router.register('mentor-hiring/ratings',SessionRatingViewSet,basename='session-rating')
+router.register('proctoring',ProctoredExamViewSet,basename='proctoring')
 urlpatterns=[path('uploads/', AssetUploadView.as_view()), path('uploads/<uuid:asset_id>/content/', AssetContentView.as_view()),
 path('health/',HealthView.as_view()),path('auth/csrf/',CsrfView.as_view()),path('auth/register/',AuthView.as_view(),{'action':'register'}),path('auth/login/',AuthView.as_view(),{'action':'login'}),path('auth/logout/',LogoutView.as_view()),path('auth/me/',MeView.as_view()),path('profile/',MeView.as_view()),path('profile/summary/',ProfileSummaryView.as_view()),path('instructors/<int:user_id>/',InstructorProfileView.as_view()),path('auth/change-password/',ChangePasswordView.as_view()),path('auth/verify/<uuid:token>/',VerifyView.as_view()),path('auth/resend-verification/',ResendVerificationView.as_view()),path('auth/password-reset/',PasswordResetView.as_view()),path('auth/password-reset/confirm/<uuid:token>/',PasswordResetView.as_view()),path('dashboard/',DashboardView.as_view()),path('leaderboard/',LeaderboardView.as_view()),path('staff/dashboard/',StaffDashboardView.as_view()),path('',include(router.urls))]

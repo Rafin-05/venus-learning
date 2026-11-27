@@ -5,6 +5,7 @@ from rest_framework.exceptions import ValidationError
 from . import finance_services
 from .finance_models import TopUpRequest, WithdrawalRequest
 from .models import *
+from .proctor_models import ProctoredExamSession, ProctorEvent
 
 
 class AccountCreationForm(UserCreationForm):
@@ -109,6 +110,21 @@ class WithdrawalRequestAdmin(admin.ModelAdmin):
     readonly_fields = ('created_at', 'reviewed_by', 'reviewed_at')
     actions = (_approve_withdrawals, _reject_withdrawals)
     actions_on_top = True
+
+
+@admin.register(ProctoredExamSession)
+class ProctoredExamSessionAdmin(admin.ModelAdmin):
+    list_display = ('learner', 'quiz', 'course', 'status', 'risk_score', 'started_at', 'ended_at')
+    list_filter = ('status', 'started_at')
+    search_fields = ('learner__email', 'quiz__title', 'course__title')
+    readonly_fields = ('started_at', 'ended_at', 'risk_score', 'consent_at')
+
+
+@admin.register(ProctorEvent)
+class ProctorEventAdmin(admin.ModelAdmin):
+    list_display = ('session', 'event_type', 'severity', 'created_at')
+    list_filter = ('event_type', 'severity', 'created_at')
+    search_fields = ('session__learner__email',)
 
 
 for model in (MentorProfile, Wallet, SessionRequest, MentorOffer):
