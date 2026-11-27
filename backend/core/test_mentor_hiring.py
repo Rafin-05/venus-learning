@@ -1,5 +1,6 @@
 from datetime import timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 from django.test import TestCase
 from django.utils import timezone
@@ -14,6 +15,7 @@ class MentorHiringTests(TestCase):
         self.learner = User.objects.create_user('mentor-learner@test.local', 'SafePass123!', full_name='Learner', is_verified=True)
         self.mentor = User.objects.create_user('mentor-inst@test.local', 'SafePass123!', full_name='Mentor', role='instructor', is_verified=True, instructor_approved=True)
         self.profile = MentorProfile.objects.create(user=self.mentor, qualifications='BSc Computer Science', topics='Backtracking, Dynamic Programming', hourly_rate=Decimal('1500.00'))
+        self.admin = User.objects.create_user('mentor-admin@test.local', 'SafePass123!', full_name='Admin', role='admin', is_staff=True, is_verified=True)
         self.when = (timezone.now() + timedelta(days=1)).isoformat()
 
     def login(self, email):
@@ -21,19 +23,16 @@ class MentorHiringTests(TestCase):
         self.assertEqual(client.post('/api/auth/login/', {'email': email, 'password': 'SafePass123!'}, format='json').status_code, 200)
         return client
 
+    def fund_learner(self, amount='3000.00'):
+        learner = self.login('mentor-learner@test.local')
+        r = learner.post('/api/finance/top-ups/', {'method': 'bkash', 'account_number': '01712345678', 'transaction_id': uuid4().hex[:12], 'amount': amount}, format='json')
+        self.assertEqual(r.status_code, 201)
+        admin = self.login('mentor-admin@test.local')
+        r = admin.post(f"/api/finance/top-ups/{r.data['id']}/approve/", {}, format='json')
+        self.assertEqual(r.status_code, 200)
+
     def completed_session(self, fee=Decimal('3000.00')):
         return MentorSession.objects.create(student=self.learner, mentor=self.mentor, mentor_profile=self.profile, topic='Backtracking', duration_hours=2, hourly_rate=Decimal('1500.00'), total_fee=fee, scheduled_at=timezone.now() - timedelta(hours=3), status='completed')
-
-    def test_wallet_top_up_creates_ledger_entry(self):
-        client = self.login('mentor-learner@test.local')
-        r = client.post('/api/mentor-hiring/wallet/top-up/', {'amount': '3000.00'}, format='json')
-        self.assertEqual(r.status_code, 200)
-        self.assertEqual(Decimal(r.data['wallet']['balance']), Decimal('3000.00'))
-        entries = WalletTransaction.objects.filter(user=self.learner, kind='top_up')
-        self.assertEqual(entries.count(), 1)
-        self.assertEqual(entries.first().amount, Decimal('3000.00'))
-        r = client.get('/api/mentor-hiring/wallet/transactions/')
-        self.assertEqual(len(r.data), 1)
 
     def test_browse_booking_computes_total_from_rate_and_hours(self):
         client = self.login('mentor-learner@test.local')
@@ -47,7 +46,7 @@ class MentorHiringTests(TestCase):
     def test_payment_math_deduction_and_mentor_credit(self):
         session = self.completed_session()
         client = self.login('mentor-learner@test.local')
-        client.post('/api/mentor-hiring/wallet/top-up/', {'amount': '3000.00'}, format='json')
+        self.fund_learner()
         r = client.post(f'/api/mentor-hiring/bookings/{session.id}/pay/', {}, format='json')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(Decimal(r.data['platform_deduction']), Decimal('300.00'))
@@ -68,7 +67,7 @@ class MentorHiringTests(TestCase):
     def test_payment_with_insufficient_balance_is_rejected(self):
         session = self.completed_session()
         client = self.login('mentor-learner@test.local')
-        client.post('/api/mentor-hiring/wallet/top-up/', {'amount': '100.00'}, format='json')
+        self.fund_learner('100.00')
         r = client.post(f'/api/mentor-hiring/bookings/{session.id}/pay/', {}, format='json')
         self.assertEqual(r.status_code, 400)
         session.refresh_from_db()
@@ -108,7 +107,7 @@ class MentorHiringTests(TestCase):
     def test_refund_returns_fee_to_student(self):
         session = self.completed_session()
         client = self.login('mentor-learner@test.local')
-        client.post('/api/mentor-hiring/wallet/top-up/', {'amount': '3000.00'}, format='json')
+        self.fund_learner()
         client.post(f'/api/mentor-hiring/bookings/{session.id}/pay/', {}, format='json')
         r = client.post(f'/api/mentor-hiring/bookings/{session.id}/refund/', {}, format='json')
         self.assertEqual(r.status_code, 200)

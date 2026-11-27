@@ -10,3 +10,32 @@ button:disabled{opacity:.55;cursor:not-allowed}a:focus-visible,button:focus-visi
 video,iframe{max-width:100%;border-radius:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#f5edf2;border-radius:10px;padding:18px}textarea{resize:vertical}.field legend{font-weight:700;padding:0 6px}fieldset{border:1px solid var(--line);border-radius:10px;padding:18px}.lesson-content{min-width:0}.meta{flex-wrap:wrap}.panel{overflow-wrap:anywhere}.page-title h1{overflow-wrap:anywhere}.mini-cover{object-fit:cover}.course-cover{object-fit:cover;width:100%}
 .certificate{padding:45px;text-align:center;border:3px double var(--gold);background:white}.certificate h2{font:700 34px Georgia,serif}.certificate .recipient{font:700 32px Georgia,serif;color:var(--plum);margin:30px 0}.certificate p{line-height:1.8}.certificate img{width:230px;max-width:100%}
 @media print{.nav,.footer,.side,.page-title,.certificate-tools,.non-certificate{display:none!important}.portal{display:block!important;min-height:0!important;padding:0!important}.certificate{display:none!important}.certificate.selected{display:block!important;margin:25mm 0;padding:25mm 15mm;break-inside:avoid}.certificate-list{display:block}body{background:white!important}.portal-main{width:100%}}
+
+/* Finance — mobile-money account (bKash, Nagad, Rocket). */
+.finance-stack{display:grid;gap:20px}
+.finance-band{display:grid;grid-template-columns:1.1fr 1fr;gap:26px;align-items:center;background:linear-gradient(135deg,#fff 0%,#fdf3f7 100%);border:1px solid var(--line);border-radius:18px;padding:28px 30px}
+.finance-balance{display:grid;gap:6px}
+.finance-amount{font-family:Georgia,serif;font-size:clamp(34px,5.5vw,46px);line-height:1.05;letter-spacing:-.01em;font-variant-numeric:tabular-nums;color:var(--plum)}
+.finance-balance small{color:var(--muted);line-height:1.5;max-width:34ch}
+.finance-facts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:0;padding:0}
+.finance-facts div{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.finance-facts dt{font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.finance-facts dd{margin:6px 0 0;font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.finance-split{display:grid;grid-template-columns:1.25fr 1fr;gap:20px;align-items:start}
+.finance-methods{border:0;padding:0;margin:18px 0 4px;display:flex;gap:10px;flex-wrap:wrap}
+.finance-methods legend{font-size:13px;font-weight:700;color:var(--plum);margin-bottom:8px;padding:0}
+.method-chip{position:relative;display:inline-flex;align-items:center;gap:8px;min-height:44px;padding:10px 16px;border:1px solid var(--line);border-radius:999px;background:var(--paper);font-weight:700;cursor:pointer;transition:border-color .15s ease-out,background .15s ease-out}
+.method-chip input{position:absolute;opacity:0;width:0;height:0}
+.method-chip.active{border-color:var(--plum);background:#f4e9ee;color:var(--plum)}
+.method-chip:focus-within{outline:3px solid var(--gold);outline-offset:2px}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.debit{color:#9c3838}
+.credit{color:#30734a}
+.verdict{display:block;margin-top:4px;font-weight:400}
+.tag.t-wait{background:#fdf0dc;color:#8a5a13}
+.tag.t-ok{background:#e4f3ea;color:#30734a}
+.tag.t-no{background:#fbe8e8;color:#9c3838}
+.finance-note p{line-height:1.6}
+@media(max-width:900px){.finance-band{grid-template-columns:1fr;padding:22px}.finance-split{grid-template-columns:1fr}}
+@media(max-width:560px){.finance-facts{grid-template-columns:1fr}.finance-amount{font-size:34px}}
+@media(prefers-reduced-motion:reduce){.method-chip{transition:none}}

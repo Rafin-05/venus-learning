@@ -1,6 +1,9 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
+from rest_framework.exceptions import ValidationError
+from . import finance_services
+from .finance_models import TopUpRequest, WithdrawalRequest
 from .models import *
 
 
@@ -60,6 +63,52 @@ class MentorSessionAdmin(admin.ModelAdmin):
     list_display = ('topic', 'student', 'mentor', 'scheduled_at', 'duration_hours', 'total_fee', 'status', 'payment_status')
     list_filter = ('status', 'payment_status', 'source')
     search_fields = ('topic', 'student__email', 'mentor__email')
+
+
+def _approve_top_ups(modeladmin, request, queryset):
+    for top_up in queryset.filter(status='pending'):
+        finance_services.approve_top_up(top_up.pk, request.user)
+
+
+def _reject_top_ups(modeladmin, request, queryset):
+    for top_up in queryset.filter(status='pending'):
+        finance_services.reject_top_up(top_up.pk, request.user, 'Rejected from the admin panel.')
+
+
+def _approve_withdrawals(modeladmin, request, queryset):
+    errors = []
+    for withdrawal in queryset.filter(status='pending'):
+        try:
+            finance_services.approve_withdrawal(withdrawal.pk, request.user)
+        except ValidationError:
+            errors.append(str(withdrawal.pk))
+    if errors:
+        modeladmin.message_user(request, f'Could not pay withdrawal(s) {", ".join(errors)}: balance too low.', messages.ERROR)
+
+
+def _reject_withdrawals(modeladmin, request, queryset):
+    for withdrawal in queryset.filter(status='pending'):
+        finance_services.reject_withdrawal(withdrawal.pk, request.user, 'Rejected from the admin panel.')
+
+
+@admin.register(TopUpRequest)
+class TopUpRequestAdmin(admin.ModelAdmin):
+    list_display = ('user', 'method', 'amount', 'transaction_id', 'account_number', 'status', 'created_at')
+    list_filter = ('status', 'method', 'created_at')
+    search_fields = ('user__email', 'transaction_id', 'account_number')
+    readonly_fields = ('created_at', 'reviewed_by', 'reviewed_at')
+    actions = (_approve_top_ups, _reject_top_ups)
+    actions_on_top = True
+
+
+@admin.register(WithdrawalRequest)
+class WithdrawalRequestAdmin(admin.ModelAdmin):
+    list_display = ('user', 'method', 'amount', 'account_number', 'status', 'created_at')
+    list_filter = ('status', 'method', 'created_at')
+    search_fields = ('user__email', 'account_number')
+    readonly_fields = ('created_at', 'reviewed_by', 'reviewed_at')
+    actions = (_approve_withdrawals, _reject_withdrawals)
+    actions_on_top = True
 
 
 for model in (MentorProfile, Wallet, SessionRequest, MentorOffer):

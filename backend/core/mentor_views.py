@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from django.db import transaction
 from django.db.models import Q
@@ -9,7 +9,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .mentor_models import MentorOffer, MentorProfile, MentorSession, SessionRating, SessionRequest, Wallet, WalletTransaction
-from .mentor_serializers import MentorOfferSerializer, MentorProfileSerializer, MentorSessionSerializer, SessionRatingSerializer, SessionRequestSerializer, WalletSerializer, WalletTransactionSerializer
+from .mentor_serializers import MentorOfferSerializer, MentorProfileSerializer, MentorSessionSerializer, SessionRatingSerializer, SessionRequestSerializer, WalletTransactionSerializer
 from .permissions import Verified
 
 PLATFORM_DEDUCTION_RATE = Decimal('0.10')
@@ -62,35 +62,6 @@ class MentorProfileViewSet(viewsets.ModelViewSet):
         if instance.user_id != self.request.user.id and not staff(self.request.user):
             raise PermissionDenied()
         instance.delete()
-
-
-class WalletViewSet(viewsets.ViewSet):
-    permission_classes = [Verified]
-
-    def list(self, request):
-        return Response(WalletSerializer(get_or_create_wallet(request.user)).data)
-
-    @action(detail=False, methods=['post'], url_path='top-up')
-    def top_up(self, request):
-        raw = request.data.get('amount') if isinstance(request.data, dict) else None
-        try:
-            amount = Decimal(str(raw)).quantize(CENT)
-        except (InvalidOperation, TypeError, ValueError):
-            raise ValidationError('Enter a valid top-up amount.')
-        if amount <= 0:
-            raise ValidationError('Top-up amount must be greater than zero.')
-        with transaction.atomic():
-            wallet = locked_wallet(request.user)
-            wallet.balance += amount
-            wallet.save(update_fields=['balance', 'updated_at'])
-            entry = WalletTransaction.objects.create(wallet=wallet, user=request.user, kind='top_up', status='completed', amount=amount, note='Wallet top-up (internal credit; no payment gateway).')
-        return Response({'wallet': WalletSerializer(wallet).data, 'transaction': WalletTransactionSerializer(entry).data})
-
-    @action(detail=False, methods=['get'], url_path='transactions')
-    def transactions(self, request):
-        wallet = get_or_create_wallet(request.user)
-        entries = WalletTransaction.objects.filter(wallet=wallet)
-        return Response(WalletTransactionSerializer(entries, many=True).data)
 
 
 class SessionRequestViewSet(viewsets.ModelViewSet):
@@ -276,7 +247,7 @@ class MentorSessionViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             student_wallet = locked_wallet(session.student)
             if student_wallet.balance < fee:
-                raise ValidationError('Insufficient wallet balance. Top up your wallet before paying.')
+                raise ValidationError('Insufficient balance. Top up your Finance account before paying.')
             mentor_wallet = locked_wallet(session.mentor)
             student_wallet.balance -= fee
             student_wallet.save(update_fields=['balance', 'updated_at'])

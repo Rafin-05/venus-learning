@@ -101,7 +101,7 @@ class MentorSession(models.Model):
 
 
 class WalletTransaction(models.Model):
-    KIND_CHOICES = (('top_up', 'Top-up'), ('session_payment', 'Session payment'), ('mentor_credit', 'Mentor credit'), ('platform_deduction', 'Platform deduction'), ('refund', 'Refund'))
+    KIND_CHOICES = (('top_up', 'Top-up'), ('session_payment', 'Session payment'), ('mentor_credit', 'Mentor credit'), ('platform_deduction', 'Platform deduction'), ('withdrawal', 'Withdrawal payout'), ('refund', 'Refund'))
     STATUS_CHOICES = (('completed', 'Completed'), ('paid', 'Paid'), ('credited', 'Credited to mentor'), ('refunded', 'Refunded'), ('deduction', 'Deduction applied'))
     wallet = models.ForeignKey(Wallet, null=True, blank=True, on_delete=models.CASCADE, related_name='transactions')
     user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.CASCADE, related_name='wallet_transactions')

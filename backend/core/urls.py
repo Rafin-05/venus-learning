@@ -1,7 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .assets import AssetUploadView, AssetContentView
-from .mentor_views import MentorOfferViewSet, MentorProfileViewSet, MentorSessionViewSet, SessionRatingViewSet, SessionRequestViewSet, WalletViewSet
+from .finance_views import FinanceViewSet
+from .mentor_views import MentorOfferViewSet, MentorProfileViewSet, MentorSessionViewSet, SessionRatingViewSet, SessionRequestViewSet
 from .views import *
 router=DefaultRouter()
 router.register('courses',CourseViewSet,basename='course')
@@ -24,7 +25,7 @@ router.register('staff/users',StaffUserViewSet,basename='staff-user')
 router.register('staff/courses',StaffCourseViewSet,basename='staff-course')
 router.register('staff/issues',StaffIssueViewSet,basename='staff-issue')
 router.register('mentor-hiring/mentors',MentorProfileViewSet,basename='mentor-profile')
-router.register('mentor-hiring/wallet',WalletViewSet,basename='mentor-wallet')
+router.register('finance',FinanceViewSet,basename='finance')
 router.register('mentor-hiring/requests',SessionRequestViewSet,basename='session-request')
 router.register('mentor-hiring/offers',MentorOfferViewSet,basename='mentor-offer')
 router.register('mentor-hiring/bookings',MentorSessionViewSet,basename='mentor-booking')
