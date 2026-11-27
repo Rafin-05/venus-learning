@@ -44,6 +44,7 @@ export default function Learning() {
   const [assignmentText,setAssignmentText] = useState<Record<number,string>>({});
   const [assignmentAsset,setAssignmentAsset] = useState<Record<number,string>>({});
   const [watched,setWatched] = useState(0);
+  const [playerDuration,setPlayerDuration] = useState(0);
   const watchedRef = useRef<Set<number>>(new Set());
   const playerRef = useRef<any>(null);
   const timerRef = useRef<any>(null);
@@ -85,6 +86,7 @@ export default function Learning() {
     let active = true;
     watchedRef.current = new Set();
     setWatched(0);
+    setPlayerDuration(0);
     setPlayback(null);
     if (playerRef.current) { try { playerRef.current.destroy(); } catch { /* already gone */ } playerRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
@@ -109,6 +111,7 @@ export default function Learning() {
                   const player = playerRef.current; if (!player) return;
                   const current = Math.floor(player.getCurrentTime() || 0);
                   const dur = Math.floor(player.getDuration() || duration || 0);
+                  if (dur > 0) setPlayerDuration(dur);
                   watchedRef.current.add(current);
                   const total = watchedRef.current.size;
                   setWatched(total);
@@ -122,6 +125,7 @@ export default function Learning() {
                   const player = playerRef.current; if (!player) return;
                   const current = Math.floor(player.getCurrentTime() || 0);
                   const dur = Math.floor(player.getDuration() || duration || 0);
+                  if (dur > 0) setPlayerDuration(dur);
                   void sendProgress(selected.id, { watched_seconds: watchedRef.current.size, duration_seconds: dur || undefined, resume_position_seconds: current });
                 } catch { /* ignore */ }
               }
@@ -144,7 +148,7 @@ export default function Learning() {
     try {
       if (selected.lesson_type === 'video') {
         const threshold = playback?.completion_threshold ?? 90;
-        const duration = playback?.duration_seconds || selected.duration_seconds || 0;
+        const duration = playerDuration || playback?.duration_seconds || selected.duration_seconds || 0;
         const pct = duration ? Math.min(100, Math.round(watched * 100 / duration)) : (playback?.watch_percentage || 0);
         if (pct < threshold) { setNotice(`Watch ${threshold}% of this video to complete it — you are at ${pct}%.`); return; }
         const result = await sendProgress(selected.id, { watched_seconds: watched, duration_seconds: duration || undefined, resume_position_seconds: playback?.resume_position_seconds || 0 });
@@ -189,7 +193,7 @@ export default function Learning() {
   if (loading) return <main className="learn-page"><LearnerLoading label="Loading your course…"/></main>;
   if (error || !course) return <main className="learn-page"><LearnerError message={error || 'Course not found.'} retry={load}/><p><Link href={`/courses/${id}`}>Course overview and enrollment</Link></p></main>;
   const embed = playback?.embed_url || youtubeEmbed(selected?.video_url, selected?.provider_video_id); const index = lessons.findIndex(lesson => lesson.id === selectedId);
-  const videoDuration = playback?.duration_seconds || selected?.duration_seconds || 0;
+  const videoDuration = playerDuration || playback?.duration_seconds || selected?.duration_seconds || 0;
   const videoPct = videoDuration ? Math.min(100, Math.round(watched * 100 / videoDuration)) : (playback?.watch_percentage || selected?.watch_percentage || 0);
   return <main className="learn-page">
     <div className="learn-top"><Link href={`/courses/${id}`}>← Course overview</Link><span>{course.title}</span><b>{Object.values(progress).filter(value => value === 100).length} / {lessons.length} complete</b></div>
