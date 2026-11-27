@@ -134,6 +134,19 @@ class FinanceTests(TestCase):
         self.assertEqual(r.data['status'], 'rejected')
         self.assertEqual(Decimal(Wallet.objects.get(user=self.instructor).balance), Decimal('800.00'))
 
+    def test_staff_sees_all_withdrawal_requests_for_review(self):
+        self.credit_instructor('800.00')
+        self.withdraw('300.00')
+        r = self.login('fin-admin@test.local').get('/api/finance/withdrawals/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(r.data), 1)
+        self.assertEqual(r.data[0]['user_email'], 'fin-inst@test.local')
+        self.assertEqual(r.data[0]['status'], 'pending')
+
+        learner_view = self.login('fin-learner@test.local').get('/api/finance/withdrawals/')
+        self.assertEqual(learner_view.status_code, 200)
+        self.assertEqual(learner_view.data, [])
+
     def test_transactions_endpoint_lists_ledger(self):
         r = self.top_up('400.00')
         self.login('fin-admin@test.local').post(f"/api/finance/top-ups/{r.data['id']}/approve/", {}, format='json')

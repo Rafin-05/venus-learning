@@ -16,6 +16,7 @@ def clean_account_number(value):
 
 
 class TopUpRequestSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source='user.email', read_only=True)
     method_label = serializers.CharField(source='get_method_display', read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     method = serializers.ChoiceField(choices=PAYMENT_METHODS)
@@ -23,7 +24,7 @@ class TopUpRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TopUpRequest
-        fields = ('id', 'method', 'method_label', 'account_number', 'transaction_id', 'amount', 'status', 'status_label', 'review_note', 'created_at')
+        fields = ('id', 'user_email', 'method', 'method_label', 'account_number', 'transaction_id', 'amount', 'status', 'status_label', 'review_note', 'created_at')
         read_only_fields = ('id', 'status', 'status_label', 'review_note', 'created_at')
 
     def validate_account_number(self, value):
@@ -42,6 +43,7 @@ class TopUpRequestSerializer(serializers.ModelSerializer):
 
 
 class WithdrawalRequestSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source='user.email', read_only=True)
     method_label = serializers.CharField(source='get_method_display', read_only=True)
     status_label = serializers.CharField(source='get_status_display', read_only=True)
     method = serializers.ChoiceField(choices=PAYMENT_METHODS)
@@ -49,7 +51,7 @@ class WithdrawalRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = WithdrawalRequest
-        fields = ('id', 'method', 'method_label', 'account_number', 'amount', 'status', 'status_label', 'review_note', 'created_at')
+        fields = ('id', 'user_email', 'method', 'method_label', 'account_number', 'amount', 'status', 'status_label', 'review_note', 'created_at')
         read_only_fields = ('id', 'status', 'status_label', 'review_note', 'created_at')
 
     def validate_account_number(self, value):

@@ -63,9 +63,8 @@ class FinanceViewSet(viewsets.ViewSet):
                 raise ValidationError('The withdrawal amount is higher than your available balance.')
             withdrawal = serializer.save(user=request.user)
             return Response(WithdrawalRequestSerializer(withdrawal).data, status=201)
-        if request.user.role != 'instructor':
-            return Response([])
-        return Response(WithdrawalRequestSerializer(WithdrawalRequest.objects.filter(user=request.user)[:50], many=True).data)
+        queryset = WithdrawalRequest.objects.all() if staff(request.user) else WithdrawalRequest.objects.filter(user=request.user)
+        return Response(WithdrawalRequestSerializer(queryset[:50], many=True).data)
 
     @action(detail=False, methods=['get'], url_path='transactions')
     def transactions(self, request):
