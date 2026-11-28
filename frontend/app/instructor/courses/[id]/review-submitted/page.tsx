@@ -2,8 +2,8 @@
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import PortalShell from '../../../../components/PortalShell';
-import { api } from '../../../../lib/api';
+import PortalShell from '../../../../../components/PortalShell';
+import { api } from '../../../../../lib/api';
 
 type Course = { id: number; title: string; status: string };
 
