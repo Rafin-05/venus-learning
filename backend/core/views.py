@@ -489,8 +489,6 @@ class CourseViewSet(viewsets.ModelViewSet):
         course = self.get_object()
         require_editor(request.user, course)
         require_object_body(request)
-        if course.status == 'approved':
-            raise ValidationError('This course is already approved and visible to learners.')
         if not course.units.exists():
             raise ValidationError('Add at least one section before submitting for review.')
         if not Lesson.objects.filter(unit__course=course).exists():
