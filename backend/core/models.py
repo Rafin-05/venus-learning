@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
@@ -75,6 +76,24 @@ class FocusSession(models.Model):
 class Quiz(models.Model):
     course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='quizzes'); lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='quizzes'); title=models.CharField(max_length=200); owner=models.ForeignKey(User,on_delete=models.CASCADE); pass_percentage=models.PositiveSmallIntegerField(default=70)
     time_limit_minutes=models.PositiveIntegerField(null=True,blank=True); attempts_allowed=models.PositiveIntegerField(null=True,blank=True); shuffle_questions=models.BooleanField(default=False); shuffle_options=models.BooleanField(default=False); show_answers=models.CharField(max_length=20,default='after_review',choices=(('immediate','Immediately'),('after_review','After review'),('never','Never')))
+    # Final exam: at most one per course. It sits after all lessons, is taken
+    # only with camera monitoring, and gates the certificate. Regular quizzes
+    # (is_final=False) stay freely addable after any unit/lesson.
+    is_final=models.BooleanField(default=False)
+
+    def clean(self):
+        # One final exam per course. No conditional UniqueConstraint here:
+        # MySQL does not support partial unique indexes, so a conditioned
+        # constraint would silently become a plain unique on course and
+        # forbid regular quizzes. The API enforces the same rule in
+        # QuizSerializer.validate(); clean() covers admin/forms.
+        super().clean()
+        if self.is_final and self.course_id:
+            clash = Quiz.objects.filter(course_id=self.course_id, is_final=True)
+            if self.pk:
+                clash = clash.exclude(pk=self.pk)
+            if clash.exists():
+                raise DjangoValidationError({'is_final': 'This course already has a final exam. Unmark it first to choose another.'})
 class CourseReview(models.Model):
     """Audit trail for the admin review workflow (PDF §13)."""
     DECISIONS=(('submitted','Submitted for review'),('approved','Approved'),('rejected','Rejected'),('changes_requested','Changes requested'))
