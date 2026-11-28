@@ -10,6 +10,12 @@ What this v1 deliberately does NOT do:
 - No server-side video analysis (no YOLOv8 / MediaPipe on the server).
   Face presence is checked in the learner's browser only, on a
   best-effort basis, and the browser sends only "face seen / not seen".
+- Looking away is detected the same way, in the browser only: MediaPipe
+  FaceLandmarker estimates gaze direction from facial landmarks
+  on-device, and only a sustained look away (more than 5 seconds, e.g.
+  at a book or phone beside the screen) is reported as a LOOKING_AWAY
+  event (weight 5, low severity). Landmarks, images and video never
+  leave the browser.
 - The score NEVER auto-fails, auto-submits, or changes a quiz result.
   It is a review flag for the course instructor only: 0-29 Low,
   30-59 Medium, 60+ High. A session that ends at 60+ is marked
@@ -19,13 +25,14 @@ What this v1 deliberately does NOT do:
 from django.conf import settings
 from django.db import models
 
-# Event types the API accepts. LOOKING_AWAY is reserved: the v1 browser
-# client does not emit it (no gaze tracking is wired up), and
+# Event types the API accepts. LOOKING_AWAY is emitted by the browser
+# client when the learner looks away from the exam screen continuously
+# for more than 5 seconds (MediaPipe gaze tracking, on-device).
 # AUDIO_SUSPICION is not in the list at all (v1 does not listen to audio).
 EVENT_TYPES = (
     ("NO_FACE", "No face visible in the camera"),
     ("MULTIPLE_FACES", "More than one face visible"),
-    ("LOOKING_AWAY", "Learner looking away (reserved, not emitted by v1 client)"),
+    ("LOOKING_AWAY", "Learner looking away from the exam screen for more than 5 seconds"),
     ("TAB_SWITCH", "Exam tab hidden or window lost focus"),
     ("FULLSCREEN_EXIT", "Left fullscreen during the exam"),
     ("CAMERA_BLOCKED", "Camera unavailable or permission denied"),
