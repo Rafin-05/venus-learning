@@ -7,9 +7,9 @@ import {all, api, patch, post, type User} from '../../lib/api';
 import {LearnerEmpty, LearnerLoading} from '../../components/LearnerStates';
 
 type MentorProfile = {id: number; user: number; mentor_name: string; mentor_email: string; qualifications: string; topics: string; hourly_rate: string; is_available: boolean};
-type Offer = {id: number; session_request: number; mentor: number; mentor_name: string; hourly_rate: string; proposed_time: string; message: string; status: string};
+type Offer = {id: number; session_request: number; mentor: number; mentor_name: string; hourly_rate: string; pricing_type: string; agreed_amount: string | null; proposed_time: string; message: string; status: string};
 type SessionRequest = {id: number; student: number; student_name: string; topic: string; problem: string; tried: string; preferred_duration_hours: number; preferred_times: string[]; status: string; offers: Offer[]; created_at: string};
-type Booking = {id: number; student: number; student_name: string; mentor: number; mentor_name: string; topic: string; duration_hours: number; hourly_rate: string; total_fee: string; scheduled_at: string; meet_link: string; status: string; payment_status: string; rating: {rating: number; comment: string} | null};
+type Booking = {id: number; student: number; student_name: string; mentor: number; mentor_name: string; topic: string; duration_hours: number; hourly_rate: string; pricing_type: string; agreed_amount: string | null; total_fee: string; scheduled_at: string; started_at: string | null; ended_at: string | null; elapsed_minutes: number | null; meet_link: string; status: string; payment_status: string; rating: {rating: number; comment: string} | null};
 
 const money = (value: string | number) => `Tk ${Number(value).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
 const localTime = (value: string) => new Date(value).toLocaleString(undefined, {dateStyle: 'medium', timeStyle: 'short'});
@@ -29,10 +29,20 @@ export default function MentorHiring() {
 
   const [bookingForms, setBookingForms] = useState<Record<number, {topic: string; duration: string; when: string}>>({});
   const [requestForm, setRequestForm] = useState({topic: '', problem: '', tried: '', duration: '1', times: ''});
-  const [offerForms, setOfferForms] = useState<Record<number, {when: string; rate: string; message: string}>>({});
+  const [offerForms, setOfferForms] = useState<Record<number, {when: string; rate: string; message: string; pricing: 'hourly' | 'fixed'; amount: string}>>({});
   const [profileForm, setProfileForm] = useState({qualifications: '', topics: '', rate: ''});
   const [meetLinks, setMeetLinks] = useState<Record<number, string>>({});
   const [ratingForms, setRatingForms] = useState<Record<number, {rating: string; comment: string}>>({});
+  const [joined, setJoined] = useState<Record<number, boolean>>({});
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => { const timer = window.setInterval(() => setNowMs(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
+  useEffect(() => {
+    if (tab !== 'sessions') return;
+    const timer = window.setInterval(async () => {
+      try { setBookings(await all<Booking>('/mentor-hiring/bookings/')); } catch { /* Keep the last loaded sessions; the next refresh retries. */ }
+    }, 10000);
+    return () => window.clearInterval(timer);
+  }, [tab]);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -59,6 +69,26 @@ export default function MentorHiring() {
     finally { setBusy(false); }
   }
 
+  const elapsedText = (startedAt: string | null, endedAt: string | null) => {
+    if (!startedAt) return '';
+    const end = endedAt ? new Date(endedAt).getTime() : nowMs;
+    const seconds = Math.max(0, Math.floor((end - new Date(startedAt).getTime()) / 1000));
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = seconds % 60;
+    return hours > 0 ? `${hours}h ${minutes}m ${secs}s` : `${minutes}m ${secs}s`;
+  };
+
+  async function endSession(session: Booking) {
+    setBusy(true); setError(''); setNotice('');
+    try {
+      const result = await post<{elapsed_minutes: number; total_fee: string; platform_deduction: string; credited_to_mentor: string}>(`/mentor-hiring/bookings/${session.id}/end/`, {});
+      setNotice(`Session ended after ${result.elapsed_minutes} min. Final fare ${money(result.total_fee)} — the mentor receives ${money(result.credited_to_mentor)} after the 10% platform deduction (${money(result.platform_deduction)}).`);
+      await load();
+    } catch (err) { setError(err instanceof Error ? err.message : 'The session could not be ended.'); }
+    finally { setBusy(false); }
+  }
+
   async function book(event: FormEvent, mentor: MentorProfile) {
     event.preventDefault();
     const form = bookingForms[mentor.id] || {topic: '', duration: '1', when: ''};
@@ -74,10 +104,14 @@ export default function MentorHiring() {
 
   async function makeOffer(event: FormEvent, request: SessionRequest) {
     event.preventDefault();
-    const form = offerForms[request.id] || {when: '', rate: '', message: ''};
+    const form = offerForms[request.id] || {when: '', rate: '', message: '', pricing: 'hourly', amount: ''};
     if (!form.when) { setError('Pick a time for your offer.'); return; }
-    const body: Record<string, unknown> = {session_request: request.id, proposed_time: toIso(form.when), message: form.message};
+    const body: Record<string, unknown> = {session_request: request.id, proposed_time: toIso(form.when), message: form.message, pricing_type: form.pricing};
     if (form.rate) body.hourly_rate = form.rate;
+    if (form.pricing === 'fixed') {
+      if (!form.amount || Number(form.amount) <= 0) { setError('A fixed-price offer needs an agreed amount above zero.'); return; }
+      body.agreed_amount = form.amount;
+    }
     await run(() => post('/mentor-hiring/offers/', body), 'Offer sent to the learner.');
   }
 
@@ -145,13 +179,17 @@ export default function MentorHiring() {
             <p>{request.problem}</p>
             {request.tried && <p className="muted"><b>Tried:</b> {request.tried}</p>}
             <p className="muted">By {request.student_name} · {request.preferred_duration_hours} hour{request.preferred_duration_hours === 1 ? '' : 's'}{request.preferred_times?.length ? ` · Prefers: ${request.preferred_times.join(', ')}` : ''}</p>
-            {request.offers?.length > 0 && <div>{request.offers.map(offer => <div className="activity-row" key={offer.id}><i>✦</i><span><b>{offer.mentor_name}</b> — {money(offer.hourly_rate)} / hour · {localTime(offer.proposed_time)} · total {money(Number(offer.hourly_rate) * request.preferred_duration_hours)}<small>{offer.message || 'No message'} · {offer.status}</small></span>
+            {request.offers?.length > 0 && <div>{request.offers.map(offer => <div className="activity-row" key={offer.id}><i>✦</i><span><b>{offer.mentor_name}</b> — {offer.pricing_type === 'fixed' ? `Fixed ${money(offer.agreed_amount || 0)} total` : `${money(offer.hourly_rate)} / hour · total ${money(Number(offer.hourly_rate) * request.preferred_duration_hours)}`} · {localTime(offer.proposed_time)}<small>{offer.message || 'No message'} · {offer.status}</small></span>
               {user?.role === 'learner' && request.status === 'open' && offer.status === 'pending' && <button className="btn btn-soft" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/offers/${offer.id}/accept/`, {}), 'Offer accepted — your session is booked. See My sessions.')}>Accept offer</button>}
             </div>)}</div>}
-            {isMentor && request.status === 'open' && request.student !== user?.id && (() => { const form = offerForms[request.id] || {when: '', rate: myProfile ? String(myProfile.hourly_rate) : '', message: ''}; return <form onSubmit={event => makeOffer(event, request)}>
+            {isMentor && request.status === 'open' && request.student !== user?.id && (() => { const form = offerForms[request.id] || {when: '', rate: myProfile ? String(myProfile.hourly_rate) : '', message: '', pricing: 'hourly', amount: ''}; return <form onSubmit={event => makeOffer(event, request)}>
               <div className="form-grid">
                 <div className="field"><label>Proposed time (your local time)</label><input type="datetime-local" required value={form.when} onChange={e => setOfferForms({...offerForms, [request.id]: {...form, when: e.target.value}})}/></div>
                 <div className="field"><label>Hourly rate (Tk)</label><input type="number" min="1" step="0.01" value={form.rate} onChange={e => setOfferForms({...offerForms, [request.id]: {...form, rate: e.target.value}})}/></div>
+              </div>
+              <div className="form-grid">
+                <div className="field"><label>Pricing</label><select value={form.pricing} onChange={e => setOfferForms({...offerForms, [request.id]: {...form, pricing: e.target.value as 'hourly' | 'fixed'}})}><option value="hourly">Hourly</option><option value="fixed">Fixed amount</option></select></div>
+                {form.pricing === 'fixed' && <div className="field"><label>Agreed fixed amount (Tk)</label><input type="number" min="1" step="0.01" required value={form.amount} onChange={e => setOfferForms({...offerForms, [request.id]: {...form, amount: e.target.value}})}/></div>}
               </div>
               <div className="field"><label>Message</label><input value={form.message} onChange={e => setOfferForms({...offerForms, [request.id]: {...form, message: e.target.value}})}/></div>
               <button className="btn btn-soft" disabled={busy}>Offer to teach</button>
@@ -165,10 +203,16 @@ export default function MentorHiring() {
         <p className="muted">Session fees are paid from your <Link href="/finance"><b>Finance</b></Link> balance after the session. Mentors receive 90%; the 10% platform deduction is listed in your finance history.</p>
         {bookings.map(session => { const mine = session.student === user?.id; const rating = ratingForms[session.id] || {rating: '5', comment: ''}; return <section className="panel" key={session.id}>
           <div className="panel-head"><h2>{session.topic}</h2><span className="tag">{session.status} · {session.payment_status}</span></div>
-          <p className="muted">{mine ? `Mentor: ${session.mentor_name}` : `Learner: ${session.student_name}`} · {localTime(session.scheduled_at)} (your local time) · {session.duration_hours}h · Total {money(session.total_fee)} ({money(session.hourly_rate)} / hour)</p>
-          {session.meet_link ? <p><a className="btn btn-primary" href={session.meet_link} target="_blank" rel="noreferrer">Join Google Meet</a></p> : <p className="muted">The meeting link will appear here once the mentor adds it.</p>}
+          <p className="muted">{mine ? `Mentor: ${session.mentor_name}` : `Learner: ${session.student_name}`} · {localTime(session.scheduled_at)} (your local time) · {session.duration_hours}h · Total {money(session.total_fee)} ({session.pricing_type === 'fixed' ? `Fixed ${money(session.agreed_amount || 0)}` : `${money(session.hourly_rate)} / hour`})</p>
+          {mine && session.status === 'live' && (joined[session.id] ? <p role="status"><b>You are in the class</b> · {elapsedText(session.started_at, session.ended_at)}</p> : <p><a className="btn btn-primary" href={session.meet_link} target="_blank" rel="noreferrer" onClick={() => setJoined({...joined, [session.id]: true})}>Join now</a></p>)}
+          {mine && session.status === 'confirmed' && <p className="muted">Join now will appear here once your mentor starts the session.</p>}
+          {!mine && (session.meet_link ? <p><a className="btn btn-primary" href={session.meet_link} target="_blank" rel="noreferrer">Join Google Meet</a></p> : <p className="muted">Add the Google Meet link below — the session cannot start without it.</p>)}
+          {!mine && session.status === 'live' && <p role="status"><b>Class in progress</b> · {elapsedText(session.started_at, session.ended_at)}</p>}
+          {session.status === 'completed' && session.started_at && <p className="muted">Class lasted {elapsedText(session.started_at, session.ended_at)} · Final fare {money(session.total_fee)} — mentor receives {money(Number(session.total_fee) * 0.9)} after the 10% platform deduction.</p>}
           <div className="actions">
             {!mine && session.status === 'pending' && <button className="btn btn-primary" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/bookings/${session.id}/confirm/`, {}), 'Booking confirmed.')}>Confirm booking</button>}
+            {!mine && session.status === 'confirmed' && <button className="btn btn-primary" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/bookings/${session.id}/start/`, {}), 'Session started — the learner can now join.')}>Start session</button>}
+            {!mine && session.status === 'live' && <button className="btn btn-primary" disabled={busy} onClick={() => endSession(session)}>End session</button>}
             {session.status === 'confirmed' && <button className="btn btn-soft" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/bookings/${session.id}/complete/`, {}), 'Session marked completed.')}>Mark completed</button>}
             {(session.status === 'pending' || session.status === 'confirmed') && <button className="btn btn-ghost" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/bookings/${session.id}/cancel/`, {}), 'Session cancelled. No fee is charged.')}>Cancel</button>}
             {mine && session.status === 'completed' && session.payment_status === 'unpaid' && <button className="btn btn-primary" disabled={busy} onClick={() => run(() => post(`/mentor-hiring/bookings/${session.id}/pay/`, {}), 'Paid. 90% was credited to your mentor; the 10% platform deduction is in your Finance history.')}>Pay {money(session.total_fee)} from Finance</button>}

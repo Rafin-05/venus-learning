@@ -52,11 +52,14 @@ class SessionRequest(models.Model):
 
 
 class MentorOffer(models.Model):
+    PRICING_CHOICES = (('hourly', 'Hourly'), ('fixed', 'Fixed amount'))
     STATUS_CHOICES = (('pending', 'Pending'), ('accepted', 'Accepted'), ('declined', 'Declined'))
     session_request = models.ForeignKey(SessionRequest, on_delete=models.CASCADE, related_name='offers')
     mentor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mentor_offers')
     mentor_profile = models.ForeignKey(MentorProfile, null=True, blank=True, on_delete=models.SET_NULL, related_name='offers')
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    pricing_type = models.CharField(max_length=10, choices=PRICING_CHOICES, default='hourly')
+    agreed_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     proposed_time = models.DateTimeField()
     message = models.TextField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
@@ -72,8 +75,9 @@ class MentorOffer(models.Model):
 
 class MentorSession(models.Model):
     SOURCE_CHOICES = (('browse', 'Browse Mentors'), ('request', 'Session Request'))
-    STATUS_CHOICES = (('pending', 'Pending mentor confirmation'), ('confirmed', 'Confirmed'), ('cancelled', 'Cancelled'), ('completed', 'Completed'))
+    STATUS_CHOICES = (('pending', 'Pending mentor confirmation'), ('confirmed', 'Confirmed'), ('live', 'Live'), ('cancelled', 'Cancelled'), ('completed', 'Completed'))
     PAYMENT_CHOICES = (('unpaid', 'Unpaid'), ('paid', 'Paid'), ('refunded', 'Refunded'))
+    PRICING_CHOICES = (('hourly', 'Hourly'), ('fixed', 'Fixed amount'))
     DURATION_CHOICES = ((1, '1 hour'), (2, '2 hours'))
     student = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mentor_sessions_as_student')
     mentor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mentor_sessions_as_mentor')
@@ -84,8 +88,12 @@ class MentorSession(models.Model):
     topic = models.CharField(max_length=200)
     duration_hours = models.PositiveSmallIntegerField(choices=DURATION_CHOICES, default=1)
     hourly_rate = models.DecimalField(max_digits=10, decimal_places=2)
+    pricing_type = models.CharField(max_length=10, choices=PRICING_CHOICES, default='hourly')
+    agreed_amount = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     total_fee = models.DecimalField(max_digits=12, decimal_places=2)
     scheduled_at = models.DateTimeField()
+    started_at = models.DateTimeField(null=True, blank=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
     meet_link = models.URLField(blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
     payment_status = models.CharField(max_length=20, choices=PAYMENT_CHOICES, default='unpaid')

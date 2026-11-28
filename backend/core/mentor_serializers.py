@@ -48,9 +48,9 @@ class MentorOfferSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = MentorOffer
-        fields = ('id', 'session_request', 'mentor', 'mentor_name', 'mentor_profile', 'hourly_rate', 'proposed_time', 'message', 'status', 'created_at')
+        fields = ('id', 'session_request', 'mentor', 'mentor_name', 'mentor_profile', 'hourly_rate', 'pricing_type', 'agreed_amount', 'proposed_time', 'message', 'status', 'created_at')
         read_only_fields = ('id', 'mentor', 'mentor_name', 'mentor_profile', 'status', 'created_at')
-        extra_kwargs = {'hourly_rate': {'required': False}}
+        extra_kwargs = {'hourly_rate': {'required': False}, 'agreed_amount': {'required': False}}
 
 
 class SessionRatingSerializer(serializers.ModelSerializer):
@@ -68,11 +68,19 @@ class MentorSessionSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.full_name', read_only=True)
     mentor_name = serializers.CharField(source='mentor.full_name', read_only=True)
     rating = serializers.SerializerMethodField()
+    elapsed_minutes = serializers.SerializerMethodField()
 
     class Meta:
         model = MentorSession
-        fields = ('id', 'student', 'student_name', 'mentor', 'mentor_name', 'mentor_profile', 'source', 'session_request', 'offer', 'topic', 'duration_hours', 'hourly_rate', 'total_fee', 'scheduled_at', 'meet_link', 'status', 'payment_status', 'paid_at', 'rating', 'created_at', 'updated_at')
-        read_only_fields = ('id', 'student', 'student_name', 'mentor_name', 'mentor_profile', 'source', 'session_request', 'offer', 'hourly_rate', 'total_fee', 'status', 'payment_status', 'paid_at', 'rating', 'created_at', 'updated_at')
+        fields = ('id', 'student', 'student_name', 'mentor', 'mentor_name', 'mentor_profile', 'source', 'session_request', 'offer', 'topic', 'duration_hours', 'hourly_rate', 'pricing_type', 'agreed_amount', 'total_fee', 'scheduled_at', 'started_at', 'ended_at', 'elapsed_minutes', 'meet_link', 'status', 'payment_status', 'paid_at', 'rating', 'created_at', 'updated_at')
+        read_only_fields = ('id', 'student', 'student_name', 'mentor_name', 'mentor_profile', 'source', 'session_request', 'offer', 'hourly_rate', 'pricing_type', 'agreed_amount', 'total_fee', 'started_at', 'ended_at', 'elapsed_minutes', 'status', 'payment_status', 'paid_at', 'rating', 'created_at', 'updated_at')
+
+    def get_elapsed_minutes(self, obj):
+        if not obj.started_at:
+            return None
+        from django.utils import timezone
+        end = obj.ended_at or timezone.now()
+        return max(0, int((end - obj.started_at).total_seconds() // 60))
 
     def get_rating(self, obj):
         rating = getattr(obj, 'rating', None)
