@@ -7,6 +7,9 @@ x-api-env: &api-env
   MYSQL_USER: ${MYSQL_USER:?Set MYSQL_USER in .env}
   MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
   REDIS_URL: redis://redis:6379/0
+  JUDGE0_URL: ${JUDGE0_URL:-http://judge0-server:2358}
+  JUDGE0_API_KEY: ${JUDGE0_API_KEY:-}
+  JUDGE0_API_HOST: ${JUDGE0_API_HOST:-}
 x-api: &api
   build: ./backend
   image: venus-learning-api:local
@@ -17,6 +20,7 @@ x-api: &api
   depends_on:
     init: {condition: service_completed_successfully}
     redis: {condition: service_healthy}
+    judge0-server: {condition: service_started}
   volumes: [static:/app/staticfiles, media:/app/media]
   expose: ["8000"]
   restart: unless-stopped
@@ -56,6 +60,57 @@ services:
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
     healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 10s, timeout: 3s, retries: 10}
+  judge0-db:
+    image: postgres:16.2
+    environment:
+      POSTGRES_DB: judge0
+      POSTGRES_USER: judge0
+      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:?Set JUDGE0_POSTGRES_PASSWORD in .env}
+    volumes: [judge0-data:/var/lib/postgresql/data/]
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U judge0 -d judge0"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  judge0-redis:
+    image: redis:7.2.4
+    command: ["bash", "-c", 'docker-entrypoint.sh --appendonly no --requirepass "$$REDIS_PASSWORD"']
+    environment:
+      REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:?Set JUDGE0_REDIS_PASSWORD in .env}
+    restart: unless-stopped
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  judge0-server:
+    image: judge0/judge0:1.13.1
+    volumes: [./deploy/judge0.conf:/judge0.conf:ro]
+    environment:
+      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:?Set JUDGE0_POSTGRES_PASSWORD in .env}
+      REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:?Set JUDGE0_REDIS_PASSWORD in .env}
+    depends_on:
+      judge0-db: {condition: service_healthy}
+      judge0-redis: {condition: service_healthy}
+    expose: ["2358"]
+    privileged: true
+    restart: unless-stopped
+  judge0-worker:
+    image: judge0/judge0:1.13.1
+    command: ["./scripts/workers"]
+    volumes: [./deploy/judge0.conf:/judge0.conf:ro]
+    environment:
+      POSTGRES_PASSWORD: ${JUDGE0_POSTGRES_PASSWORD:?Set JUDGE0_POSTGRES_PASSWORD in .env}
+      REDIS_PASSWORD: ${JUDGE0_REDIS_PASSWORD:?Set JUDGE0_REDIS_PASSWORD in .env}
+    depends_on:
+      judge0-db: {condition: service_healthy}
+      judge0-redis: {condition: service_healthy}
+      judge0-server: {condition: service_started}
+    privileged: true
+    restart: unless-stopped
   init:
     build: ./backend
     image: venus-learning-api:local
@@ -91,4 +146,4 @@ services:
       frontend: {condition: service_healthy}
     restart: unless-stopped
     security_opt: [no-new-privileges:true]
-volumes: {mysql-data: {}, redis-data: {}, static: {}, media: {}}
+volumes: {mysql-data: {}, redis-data: {}, static: {}, media: {}, judge0-data: {}}
