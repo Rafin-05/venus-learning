@@ -47,4 +47,4 @@ class CategoryTests(AcceptanceBase):
         r = self.post('/api/courses/', body, user=self.instructor)
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(r.data['category'], 'Photography')
-        self.assertEqual(r.data['status'], 'pending')
+        self.assertEqual(r.data['status'], 'draft')

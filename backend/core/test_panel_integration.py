@@ -42,7 +42,7 @@ class PanelIntegrationTests(TestCase):
         )
         self.assertEqual(response.status_code, 201)
         course_id = response.data["id"]
-        self.assertEqual(response.data["status"], "pending")
+        self.assertEqual(response.data["status"], "draft")
 
         self.auth(self.admin)
         response = self.client.patch(
