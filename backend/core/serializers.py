@@ -89,11 +89,13 @@ class CourseSerializer(serializers.ModelSerializer):
     average_rating = serializers.SerializerMethodField()
     student_count = serializers.SerializerMethodField()
     lesson_count = serializers.SerializerMethodField()
+    submitted_at = serializers.SerializerMethodField()
+    latest_review = serializers.SerializerMethodField()
 
     class Meta:
         model = Course
-        fields = ('id', 'title', 'subtitle', 'description', 'category', 'subcategory', 'level', 'language', 'thumbnail', 'promo_video_url', 'promo_provider_video_id', 'outcomes', 'target_audience', 'prerequisites', 'price', 'is_free', 'enrollment_open', 'access_duration_days', 'completion_threshold', 'instructor', 'instructor_name', 'status', 'created_at', 'average_rating', 'student_count', 'lesson_count')
-        read_only_fields = ('id', 'instructor', 'instructor_name', 'status', 'created_at', 'promo_provider_video_id')
+        fields = ('id', 'title', 'subtitle', 'description', 'category', 'subcategory', 'level', 'language', 'thumbnail', 'promo_video_url', 'promo_provider_video_id', 'outcomes', 'target_audience', 'prerequisites', 'price', 'is_free', 'enrollment_open', 'access_duration_days', 'completion_threshold', 'instructor', 'instructor_name', 'status', 'submitted_at', 'latest_review', 'created_at', 'average_rating', 'student_count', 'lesson_count')
+        read_only_fields = ('id', 'instructor', 'instructor_name', 'status', 'submitted_at', 'latest_review', 'created_at', 'promo_provider_video_id')
 
     def get_average_rating(self, course):
         from django.db.models import Avg
@@ -104,6 +106,17 @@ class CourseSerializer(serializers.ModelSerializer):
 
     def get_lesson_count(self, course):
         return Lesson.objects.filter(unit__course=course).count()
+
+    def get_submitted_at(self, course):
+        # The latest time this course was sent for review; None while it is
+        # still a draft. A legacy pending row with no submitted record
+        # returns None and the UI shows 'Awaiting review'.
+        submitted = course.course_reviews.filter(decision='submitted').order_by('-created_at', '-id').first()
+        return submitted.created_at if submitted else None
+
+    def get_latest_review(self, course):
+        review = course.course_reviews.order_by('-created_at', '-id').first()
+        return CourseReviewSerializer(review).data if review else None
 
     def validate_thumbnail(self, value):
         return safe_url(value)
@@ -208,8 +221,8 @@ class LessonSerializer(serializers.ModelSerializer):
         return safe_url(value)
 
     def validate_lesson_type(self, value):
-        if value not in ('video', 'document', 'coding', 'resource', 'quiz', 'assignment'):
-            raise serializers.ValidationError('Choose video, document, coding, resource, quiz, or assignment.')
+        if value not in ('video', 'document', 'coding'):
+            raise serializers.ValidationError('Choose video, document, or coding. Quiz, assignment and resource items are separate objects, not lesson types.')
         return value
 
     def validate(self, data):
@@ -601,10 +614,11 @@ ContestWriteSerializer = ContestSerializer
 
 class AttemptSerializer(serializers.ModelSerializer):
     quiz_title = serializers.CharField(source='quiz.title', read_only=True)
+    learner_name = serializers.CharField(source='learner.full_name', read_only=True, default='')
 
     class Meta:
         model = QuizAttempt
-        fields = ('id', 'quiz', 'quiz_title', 'score', 'total', 'percentage', 'passed', 'created_at')
+        fields = ('id', 'quiz', 'quiz_title', 'learner', 'learner_name', 'score', 'total', 'percentage', 'passed', 'created_at')
 
 
 class ContestAttemptSerializer(serializers.ModelSerializer):
