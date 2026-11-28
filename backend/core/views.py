@@ -380,6 +380,24 @@ class PasswordResetView(APIView):
         return Response({'detail': 'Password updated. Sign in with your new password.'})
 
 
+class CategoryViewSet(viewsets.ModelViewSet):
+    """Admin-managed course categories.
+
+    Anyone can list them (the instructor create flow fills its category
+    dropdown from here, and the public catalog filters by category name);
+    only staff/admin can create, rename or delete one. Deleting a category
+    never touches a course: Course.category is a plain name field, so a
+    course keeps its old category text if its category is removed.
+    """
+    serializer_class = CategorySerializer
+    queryset = Category.objects.order_by('name')
+
+    def get_permissions(self):
+        if self.action in ('list', 'retrieve'):
+            return [AllowAny()]
+        return [StaffOnly()]
+
+
 class CourseViewSet(viewsets.ModelViewSet):
     serializer_class = CourseSerializer
 

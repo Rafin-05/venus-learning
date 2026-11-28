@@ -31,6 +31,27 @@ class LoginAttempt(models.Model):
     class Meta: constraints=[models.UniqueConstraint(fields=['email','ip'],name='unique_login_attempt')]
 class EmailToken(models.Model):
     user=models.ForeignKey(User,on_delete=models.CASCADE); token=models.UUIDField(default=uuid.uuid4,unique=True); kind=models.CharField(max_length=20); expires_at=models.DateTimeField(); used_at=models.DateTimeField(null=True,blank=True)
+class Category(models.Model):
+    """Admin-managed course category.
+
+    Course.category stays a plain CharField holding the category *name* —
+    it is not a foreign key, so existing courses keep working unchanged.
+    The instructor create flow loads these rows into its category dropdown;
+    an admin adds new ones here (Django admin and /admin/categories).
+    The six seeded names are the categories already used across the
+    platform (see migration 0016).
+    """
+    name = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name_plural = 'categories'
+
+    def __str__(self):
+        return self.name
+
+
 class Course(models.Model):
     STATUS=(('pending','Pending'),('approved','Approved'),('rejected','Rejected'))
     LEVEL_CHOICES=(('beginner','Beginner'),('intermediate','Intermediate'),('advanced','Advanced'))

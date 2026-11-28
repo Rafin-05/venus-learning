@@ -65,6 +65,24 @@ class PublicInstructorSerializer(serializers.ModelSerializer):
         fields = ('id', 'full_name', 'title', 'bio', 'expertise', 'profile_pic')
 
 
+class CategorySerializer(serializers.ModelSerializer):
+    """Admin-managed category. Only the name is writable; the instructor
+    create flow sends the chosen name as Course.category."""
+
+    class Meta:
+        model = Category
+        fields = ('id', 'name', 'created_at')
+        read_only_fields = ('id', 'created_at')
+
+    def validate_name(self, value):
+        name = str(value or '').strip()
+        if not name:
+            raise serializers.ValidationError('A category needs a name.')
+        if len(name) > 100:
+            raise serializers.ValidationError('Keep the category name to 100 characters or fewer.')
+        return name
+
+
 class CourseSerializer(serializers.ModelSerializer):
     instructor = PublicInstructorSerializer(read_only=True)
     instructor_name = serializers.CharField(source='instructor.full_name', read_only=True)
