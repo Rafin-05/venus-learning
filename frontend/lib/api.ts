@@ -23,6 +23,7 @@ export type InstructorProfile = {
   courses: Course[]; students: number; average_rating?: number | null; reviews: number;
   mentor_profile?: MentorProfileItem | null; sessions_completed: number;
 };
+export type CourseReviewItem = {id: number; course: number; reviewer?: number | null; reviewer_name?: string; decision: string; notes: string; created_at: string};
 export type Course = {
   id: number; title: string; subtitle?: string; description: string; category: string; subcategory?: string;
   level: string; language?: string; thumbnail?: string; promo_video_url?: string; promo_provider_video_id?: string;
@@ -30,6 +31,7 @@ export type Course = {
   price?: number | string; is_free?: boolean; enrollment_open?: boolean; access_duration_days?: number | null;
   completion_threshold?: number; instructor_name?: string; status?: string;
   average_rating?: number; student_count?: number; lesson_count?: number;
+  submitted_at?: string | null; latest_review?: CourseReviewItem | null;
 };
 
 function errorText(value: unknown, prefix = ''): string {

@@ -6,7 +6,7 @@ model, endpoint, or UI in this feature.
 """
 from django.utils import timezone
 
-from .models import Assignment, AssignmentSubmission, CourseResource, CourseReview, LessonProgress
+from .models import Assignment, AssignmentSubmission, CourseResource, CourseReview, Lesson, LessonProgress, QuizAttempt, Unit
 from .test_acceptance import AcceptanceBase
 from .video import extract_youtube_id
 
@@ -40,7 +40,7 @@ class CourseWizardTests(AcceptanceBase):
         self.assertEqual(r.data['subtitle'], 'From zero to scripts')
         self.assertEqual(r.data['promo_provider_video_id'], 'dQw4w9WgXcQ')
         self.assertEqual(r.data['outcomes'], ['Write a Python program', 'Use lists and loops'])
-        self.assertEqual(r.data['status'], 'pending')
+        self.assertEqual(r.data['status'], 'draft')
 
     def test_free_course_cannot_carry_a_price_and_bad_youtube_is_rejected(self):
         r = self.post('/api/courses/', {'title': 'X', 'description': 'x', 'is_free': True, 'price': '10.00'}, user=self.instructor)
@@ -77,7 +77,7 @@ class CourseWizardTests(AcceptanceBase):
         self.assertEqual(r.status_code, 400)
         r = self.post(f'/api/courses/{self.pending.id}/request-changes/', {'notes': 'Fix the first lesson title.'}, user=self.admin)
         self.assertEqual(r.status_code, 200, r.data)
-        self.assertEqual(r.data['course']['status'], 'pending')
+        self.assertEqual(r.data['course']['status'], 'draft')
         self.assertEqual(CourseReview.objects.filter(course=self.pending, decision='changes_requested').count(), 1)
         r = self.post(f'/api/courses/{self.pending.id}/approve/', {}, user=self.instructor)
         self.assertIn(r.status_code, (401, 403, 404, 405))
@@ -158,3 +158,77 @@ class ResourceAndAssignmentTests(AcceptanceBase):
         self.assertEqual(r.status_code, 200, r.data)
         r = self.post(f'/api/quizzes/{self.quiz.id}/submit/', {'answers': {str(self.question.id): 'a'}}, user=self.learner)
         self.assertEqual(r.status_code, 409)
+
+
+class DraftWorkflowTests(AcceptanceBase):
+    def test_create_starts_as_draft_with_no_submitted_date(self):
+        r = self.post('/api/courses/', {'title': 'Draft course', 'description': 'Still being written.', 'is_free': True, 'price': '0.00'}, user=self.instructor)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['status'], 'draft')
+        self.assertIsNone(r.data['submitted_at'])
+        self.assertIsNone(r.data['latest_review'])
+
+    def test_submit_review_moves_draft_to_pending_and_records_review(self):
+        course = self.course_for(self.instructor, 'Ready to submit', 'draft')
+        unit = Unit.objects.create(course=course, title='Basics', position=1)
+        Lesson.objects.create(unit=unit, title='First lesson', lesson_type='document', content='Read this.')
+        r = self.post(f'/api/courses/{course.id}/submit-review/', {'notes': 'Ready'}, user=self.instructor)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.assertEqual(r.data['decision'], 'submitted')
+        course.refresh_from_db()
+        self.assertEqual(course.status, 'pending')
+        self.auth(self.admin)
+        r = self.client.get(f'/api/staff/courses/{course.id}/')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertIsNotNone(r.data['submitted_at'])
+        self.assertEqual(r.data['latest_review']['decision'], 'submitted')
+
+    def test_edit_draft_stays_draft_and_edit_approved_returns_to_pending(self):
+        draft = self.course_for(self.instructor, 'Draft edit', 'draft')
+        r = self.patch(f'/api/courses/{draft.id}/', {'title': 'Draft edit v2'}, user=self.instructor)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['status'], 'draft')
+        r = self.patch(f'/api/courses/{self.course.id}/', {'title': 'Changed title'}, user=self.instructor)
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertEqual(r.data['status'], 'pending')
+
+    def test_lesson_types_quiz_assignment_resource_are_rejected(self):
+        for bad in ('quiz', 'assignment', 'resource'):
+            r = self.post('/api/lessons/', {'unit': self.unit.id, 'title': 'Bad type', 'lesson_type': bad}, user=self.instructor)
+            self.assertEqual(r.status_code, 400, r.data)
+        r = self.post('/api/lessons/', {'unit': self.unit.id, 'title': 'Good type', 'lesson_type': 'document', 'content': 'Read.'}, user=self.instructor)
+        self.assertEqual(r.status_code, 201, r.data)
+
+    def test_certificate_status_checklist_for_course_without_lessons(self):
+        course = self.course_for(self.instructor, 'No lessons yet', 'approved')
+        r = self.post(f'/api/courses/{course.id}/enroll/', {}, user=self.learner)
+        self.assertEqual(r.status_code, 201, r.data)
+        self.auth(self.learner)
+        r = self.client.get(f'/api/courses/{course.id}/certificate-status/')
+        self.assertEqual(r.status_code, 200, r.data)
+        self.assertFalse(r.data['eligible'])
+        self.assertEqual(r.data['lessons'], {'done': 0, 'total': 0})
+        self.assertIn('This course has no lessons yet.', r.data['reasons'])
+        outsider = self.user('outsider-cert@example.test', is_verified=True)
+        self.auth(outsider)
+        r = self.client.get(f'/api/courses/{course.id}/certificate-status/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_quiz_attempts_visible_to_course_instructor_only(self):
+        attempt = QuizAttempt.objects.create(quiz=self.quiz, learner=self.learner, score=1, total=1, percentage=100.0, passed=True, answers={})
+        self.auth(self.instructor)
+        r = self.client.get(f'/api/quiz-attempts/?course={self.course.id}')
+        self.assertEqual(r.status_code, 200, r.data)
+        rows = r.data if isinstance(r.data, list) else r.data.get('results', [])
+        mine = [row for row in rows if row['id'] == attempt.id]
+        self.assertEqual(len(mine), 1)
+        self.assertEqual(mine[0]['learner_name'], self.learner.full_name)
+        self.auth(self.learner)
+        r = self.client.get(f'/api/quiz-attempts/?course={self.course.id}')
+        rows = r.data if isinstance(r.data, list) else r.data.get('results', [])
+        self.assertTrue(any(row['id'] == attempt.id for row in rows))
+        outsider = self.user('outsider-attempts@example.test', is_verified=True)
+        self.auth(outsider)
+        r = self.client.get(f'/api/quiz-attempts/?course={self.course.id}')
+        rows = r.data if isinstance(r.data, list) else r.data.get('results', [])
+        self.assertFalse(any(row['id'] == attempt.id for row in rows))

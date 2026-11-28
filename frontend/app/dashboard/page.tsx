@@ -8,6 +8,10 @@ import {LearnerError, LearnerLoading, LearnerEmpty} from '../../components/Learn
 
 type Enrollment = {id: number; course: Course; progress_percent: number; enrolled_at: string; completed_at?: string | null};
 
+function greetingFor(hour: number): string {
+  return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+}
+
 export default function Dashboard() {
   const [user, setUser] = useState<User | null>(null);
   const [enrollments, setEnrollments] = useState<Enrollment[]>([]);
@@ -23,7 +27,7 @@ export default function Dashboard() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { load(); }, [load]);
-  return <PortalShell title={user ? `Good morning, ${user.full_name || 'learner'}.` : 'Your learning dashboard'} eyebrow="Your learning space">
+  return <PortalShell title={user ? `${greetingFor(new Date().getHours())}, ${user.full_name || 'learner'}.` : 'Your learning dashboard'} eyebrow="Your learning space">
     {loading ? <LearnerLoading label="Loading your dashboard…"/> : error ? <LearnerError message={error} retry={load}/> : <>
       <div className="statgrid">
         <div className="stat"><span>Courses in progress</span><b>{enrollments.filter(x => !x.completed_at && x.progress_percent < 100).length}</b><small>Based on your enrollments</small></div>

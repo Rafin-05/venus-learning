@@ -55,7 +55,10 @@ def require_editor(user, course):
 
 
 def review_after_edit(user, course):
-    if not staff(user) and course.status != 'pending':
+    # Only a published course goes back for review when edited. Drafts stay
+    # drafts and rejected courses stay rejected until the instructor
+    # explicitly submits them with POST submit-review.
+    if not staff(user) and course.status == 'approved':
         Course.objects.filter(pk=course.pk).update(status='pending')
 
 
@@ -431,12 +434,15 @@ class CourseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         if not (approved(self.request.user) or staff(self.request.user)):
             raise PermissionDenied('Instructors only.')
-        serializer.save(instructor=self.request.user, status='pending')
+        serializer.save(instructor=self.request.user, status='draft')
         attach_thumbnail_asset(serializer.instance, self.request.user)
 
     def perform_update(self, serializer):
         require_editor(self.request.user, serializer.instance)
-        serializer.save(status='pending' if not staff(self.request.user) else serializer.instance.status)
+        # Editing an approved course sends it back for review; a draft stays a
+        # draft and a rejected course stays rejected until resubmitted.
+        current = serializer.instance.status
+        serializer.save(status='pending' if (not staff(self.request.user) and current == 'approved') else serializer.instance.status)
         attach_thumbnail_asset(serializer.instance, self.request.user)
 
     def perform_destroy(self, course):
@@ -487,6 +493,9 @@ class CourseViewSet(viewsets.ModelViewSet):
             raise ValidationError('Add at least one section before submitting for review.')
         if not Lesson.objects.filter(unit__course=course).exists():
             raise ValidationError('Add at least one lesson before submitting for review.')
+        # Submitting is what moves a draft into the admin queue.
+        course.status = 'pending'
+        course.save(update_fields=['status', 'updated_at'])
         review = CourseReview.objects.create(course=course, reviewer=None, decision='submitted', notes=str(request.data.get('notes', ''))[:5000])
         return Response(CourseReviewSerializer(review).data, status=201)
 
@@ -518,10 +527,48 @@ class CourseViewSet(viewsets.ModelViewSet):
         notes = str(request.data.get('notes', '')).strip()
         if not notes:
             raise ValidationError({'notes': 'List the required fixes for the instructor.'})
-        course.status = 'pending'
+        # Back with the instructor: out of the admin queue until resubmitted.
+        course.status = 'draft'
         course.save(update_fields=['status', 'updated_at'])
         review = CourseReview.objects.create(course=course, reviewer=request.user, decision='changes_requested', notes=notes[:5000])
         return Response({'course': CourseSerializer(course, context=self.get_serializer_context()).data, 'review': CourseReviewSerializer(review).data})
+
+    def _certificate_checklist(self, course, learner, enrollment):
+        """Shared gate logic for certificate() and certificate-status."""
+        lesson_ids = list(Lesson.objects.filter(unit__course=course, is_required=True).values_list('id', flat=True))
+        if not lesson_ids:
+            lesson_ids = list(Lesson.objects.filter(unit__course=course).values_list('id', flat=True))
+        completed = enrollment.progress.filter(lesson_id__in=lesson_ids, progress=100).count()
+        lessons = {'done': completed, 'total': len(lesson_ids)}
+        # Final exam gates the certificate: when a course has a final exam,
+        # passing it (at its own pass mark) is what unlocks the certificate;
+        # regular unit/lesson quizzes no longer block it. Without a final
+        # exam, the previous rule stands — pass every course quiz.
+        final_exam = course.quizzes.filter(is_final=True).first()
+        if final_exam is not None:
+            final_passed = QuizAttempt.objects.filter(learner=learner, quiz=final_exam, passed=True).exists()
+            final = {'exists': True, 'title': final_exam.title, 'passed': final_passed}
+            quizzes = {'done': None, 'total': None, 'required': False}
+        else:
+            passed = sum(1 for quiz in course.quizzes.all() if QuizAttempt.objects.filter(learner=learner, quiz=quiz, passed=True).exists())
+            quizzes = {'done': passed, 'total': course.quizzes.count(), 'required': True}
+            final = {'exists': False, 'title': None, 'passed': None}
+        required_assignments = list(course.assignments.filter(is_required=True))
+        graded = sum(1 for assignment in required_assignments if AssignmentSubmission.objects.filter(learner=learner, assignment=assignment, status='graded').exists())
+        assignments = {'done': graded, 'total': len(required_assignments)}
+        lessons_ok = bool(lesson_ids) and completed == len(lesson_ids)
+        quizzes_ok = final['passed'] if final['exists'] else quizzes['done'] == quizzes['total']
+        assignments_ok = graded == len(required_assignments)
+        reasons = []
+        if not lessons_ok:
+            reasons.append('Complete every required lesson, including coding challenges, first.' if lesson_ids else 'This course has no lessons yet.')
+        if final['exists'] and not final['passed']:
+            reasons.append('Pass the final exam first.')
+        elif not final['exists'] and quizzes['done'] != quizzes['total']:
+            reasons.append('Pass all course quizzes first.')
+        if graded != len(required_assignments):
+            reasons.append('Complete all required assignments first.')
+        return {'lessons': lessons, 'quizzes': quizzes, 'final': final, 'assignments': assignments, 'eligible': lessons_ok and quizzes_ok and assignments_ok, 'reasons': reasons}
 
     @action(detail=True, methods=['post'])
     def certificate(self, request, pk=None):
@@ -529,29 +576,30 @@ class CourseViewSet(viewsets.ModelViewSet):
         enrollment = Enrollment.objects.filter(learner=request.user, course=course).first()
         if not enrollment or request.user.role != 'learner':
             raise PermissionDenied('Enroll in this course first.')
-        lesson_ids = list(Lesson.objects.filter(unit__course=course, is_required=True).values_list('id', flat=True))
-        if not lesson_ids:
-            lesson_ids = list(Lesson.objects.filter(unit__course=course).values_list('id', flat=True))
-        completed = enrollment.progress.filter(lesson_id__in=lesson_ids, progress=100).count()
-        if not lesson_ids or completed != len(lesson_ids):
+        checklist = self._certificate_checklist(course, request.user, enrollment)
+        if not checklist['lessons']['total'] or checklist['lessons']['done'] != checklist['lessons']['total']:
             raise ValidationError('Complete every required lesson, including coding challenges, first.')
-        # Final exam gates the certificate: when a course has a final exam,
-        # passing it (at its own pass mark) is what unlocks the certificate;
-        # regular unit/lesson quizzes no longer block it. Without a final
-        # exam, the previous rule stands — pass every course quiz.
-        final_exam = course.quizzes.filter(is_final=True).first()
-        if final_exam is not None:
-            if not QuizAttempt.objects.filter(learner=request.user, quiz=final_exam, passed=True).exists():
+        if checklist['final']['exists']:
+            if not checklist['final']['passed']:
                 raise ValidationError('Pass the final exam first.')
-        elif any(not QuizAttempt.objects.filter(learner=request.user, quiz=quiz, passed=True).exists() for quiz in course.quizzes.all()):
+        elif checklist['quizzes']['done'] != checklist['quizzes']['total']:
             raise ValidationError('Pass all course quizzes first.')
-        if any(not AssignmentSubmission.objects.filter(learner=request.user, assignment=assignment, status='graded').exists() for assignment in course.assignments.filter(is_required=True)):
+        if checklist['assignments']['done'] != checklist['assignments']['total']:
             raise ValidationError('Complete all required assignments first.')
         certificate, created = Certificate.objects.get_or_create(learner=request.user, course=course)
         if enrollment.completed_at is None:
             enrollment.completed_at = timezone.now()
             enrollment.save(update_fields=['completed_at'])
         return Response(CertificateSerializer(certificate).data, status=201 if created else 200)
+
+    @action(detail=True, methods=['get'], url_path='certificate-status')
+    def certificate_status(self, request, pk=None):
+        """What is still missing before a certificate can be issued."""
+        course = self.get_object()
+        enrollment = Enrollment.objects.filter(learner=request.user, course=course).first()
+        if not enrollment or request.user.role != 'learner':
+            raise PermissionDenied('Enroll in this course first.')
+        return Response(self._certificate_checklist(course, request.user, enrollment))
 
 
 class UnitViewSet(viewsets.ModelViewSet):
@@ -1151,7 +1199,25 @@ class QuizAttemptViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [Verified]
 
     def get_queryset(self):
-        return QuizAttempt.objects.filter(learner=self.request.user).select_related('quiz').order_by('-created_at', '-id')
+        user = self.request.user
+        queryset = QuizAttempt.objects.all().select_related('quiz', 'learner').order_by('-created_at', '-id')
+        if staff(user):
+            pass
+        elif approved(user):
+            queryset = queryset.filter(quiz__course__instructor=user)
+        else:
+            queryset = queryset.filter(learner=user)
+        quiz = self.request.query_params.get('quiz')
+        if quiz:
+            if not quiz.isdigit():
+                raise ValidationError('Invalid quiz ID.')
+            queryset = queryset.filter(quiz_id=quiz)
+        course = self.request.query_params.get('course')
+        if course:
+            if not course.isdigit():
+                raise ValidationError('Invalid course ID.')
+            queryset = queryset.filter(quiz__course_id=course)
+        return queryset
 
 
 class RunnerUnavailable(Exception):

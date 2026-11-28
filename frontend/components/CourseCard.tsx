@@ -5,7 +5,15 @@ import type {Course} from '../lib/api';
 function imageSource(value: string | undefined, fallback: string): string {
   if (!value) return fallback;
   if (value.startsWith('/') && !value.startsWith('//')) return value;
-  try { const url = new URL(value); return url.protocol === 'https:' ? url.href : fallback; }
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:') return url.href;
+    // Uploaded thumbnails are served from FRONTEND_URL, which is plain http
+    // on local installs. Accept same-origin http: URLs (and localhost) so
+    // they render; arbitrary http: URLs still fall back (mixed content).
+    if (url.protocol === 'http:' && (url.hostname === 'localhost' || url.hostname === '127.0.0.1' || (typeof window !== 'undefined' && url.origin === window.location.origin))) return url.href;
+    return fallback;
+  }
   catch { return fallback; }
 }
 export default function CourseCard({course, index = 0}: {course: Course; index?: number}) {

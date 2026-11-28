@@ -53,7 +53,7 @@ class Category(models.Model):
 
 
 class Course(models.Model):
-    STATUS=(('pending','Pending'),('approved','Approved'),('rejected','Rejected'))
+    STATUS=(('draft','Draft'),('pending','Pending'),('approved','Approved'),('rejected','Rejected'))
     LEVEL_CHOICES=(('beginner','Beginner'),('intermediate','Intermediate'),('advanced','Advanced'))
     title=models.CharField(max_length=200); subtitle=models.CharField(max_length=300,blank=True); description=models.TextField(); category=models.CharField(max_length=100,blank=True); subcategory=models.CharField(max_length=100,blank=True); level=models.CharField(max_length=50,blank=True,choices=LEVEL_CHOICES); language=models.CharField(max_length=20,default='en'); thumbnail=models.URLField(blank=True); promo_video_url=models.URLField(blank=True); promo_provider_video_id=models.CharField(max_length=20,blank=True)
     # Wizard step B (PDF §4): measurable outcomes, audience and prerequisites.
@@ -62,12 +62,12 @@ class Course(models.Model):
     price=models.DecimalField(max_digits=10,decimal_places=2,default=Decimal('0.00')); is_free=models.BooleanField(default=True); enrollment_open=models.BooleanField(default=True); access_duration_days=models.PositiveIntegerField(null=True,blank=True)
     # PDF §7/§17: video completion threshold (percent watched) for required lessons.
     completion_threshold=models.PositiveSmallIntegerField(default=90)
-    instructor=models.ForeignKey(User,on_delete=models.CASCADE,related_name='courses'); status=models.CharField(max_length=20,choices=STATUS,default='pending'); created_at=models.DateTimeField(auto_now_add=True); updated_at=models.DateTimeField(auto_now=True)
+    instructor=models.ForeignKey(User,on_delete=models.CASCADE,related_name='courses'); status=models.CharField(max_length=20,choices=STATUS,default='draft'); created_at=models.DateTimeField(auto_now_add=True); updated_at=models.DateTimeField(auto_now=True)
 class Unit(models.Model):
     course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='units'); title=models.CharField(max_length=200); position=models.PositiveIntegerField(default=0)
     class Meta: ordering=['position','id']
 class Lesson(models.Model):
-    LESSON_TYPES=(('video','Video'),('document','Document'),('coding','Coding'),('resource','Resource'),('quiz','Quiz'),('assignment','Assignment'))
+    LESSON_TYPES=(('video','Video'),('document','Document'),('coding','Coding'))
     unit=models.ForeignKey(Unit,on_delete=models.CASCADE,related_name='lessons'); title=models.CharField(max_length=200); description=models.TextField(blank=True); content=models.TextField(blank=True); video_url=models.URLField(blank=True)
     # Provider-neutral video record (PDF §6): provider + provider_video_id, not a raw URL.
     # 'youtube' is the initial provider; other HTTPS hosts are stored as 'external'.
