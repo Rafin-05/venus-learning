@@ -10,7 +10,7 @@ import { api, list, post } from '../../../../lib/api';
 // Step 1 — Course basics: thumbnail upload first, then title, description,
 //   category (dropdown of every category in the platform, loaded from
 //   GET /categories/ — an admin adds more at /admin/categories), level,
-//   access duration, and paid-or-free (price only when Paid). "Next"
+//   access duration, and free-or-paid (Paid is disabled until payment collection is built). "Next"
 //   creates the course with the same POST /courses/ payload as before.
 //   Nothing is sent to an admin here.
 // Step 2 — Curriculum: the instructor creates units first. Lessons only
@@ -24,8 +24,7 @@ import { api, list, post } from '../../../../lib/api';
 //   /courses/{id}/submit-review/ and land on the review-submitted
 //   confirmation page. That call is the moment the course goes to an
 //   admin as Pending — not before. (The status field itself reads
-//   "pending" from creation, as it always has; see the note on the
-//   submit panel. The review record, and the admin queue entry it
+//   "draft" from creation; the review record, and the admin queue entry it
 //   represents, are only created by this final call, which also requires
 //   at least one unit and one lesson.)
 type Question = { question: string; option_a: string; option_b: string; option_c: string; option_d: string; correct_answer: string };
@@ -210,8 +209,8 @@ export default function NewCourse() {
     }
     const isFinal = addKind === 'final';
     if (!quizTitle.trim()) { setError(isFinal ? 'Final exam title is required.' : 'Quiz title is required.'); return; }
-    if (questions.some(q => !q.question.trim() || !q.option_a.trim() || !q.option_b.trim() || !q.option_c.trim() || !q.option_d.trim())) {
-      setError('Every question needs its text and all four options.'); return;
+    if (questions.some(q => { const options = { a: q.option_a, b: q.option_b, c: q.option_c, d: q.option_d }; return !q.question.trim() || !q.option_a.trim() || !q.option_b.trim() || !(options as Record<string, string>)[q.correct_answer]?.trim(); })) {
+      setError('Every question needs its text, options A and B, and a correct answer that points to a filled-in option. Options C and D are optional.'); return;
     }
     if (passPercentage < 1 || passPercentage > 100) { setError('Pass mark must be between 1 and 100.'); return; }
     if (isFinal && existingFinal) { setError(`This course already has a final exam (“${existingFinal.title}”).`); return; }
@@ -259,7 +258,7 @@ export default function NewCourse() {
       {step === 1 && !created && <form onSubmit={createCourse}>
         <h3>Step 1 — Course basics</h3>
         <p className="muted">Start with the thumbnail, then the basics. The course is only created when you press Next — nothing is sent to an admin on this page.</p>
-        <div className="field"><label>Thumbnail *</label><AssetUpload purpose="thumbnail" onUploaded={url => setF({ ...f, thumbnail: url })} />
+        <div className="field"><label>Thumbnail</label><AssetUpload purpose="thumbnail" onUploaded={url => setF({ ...f, thumbnail: url })} />
           {f.thumbnail && <img src={f.thumbnail} alt="Course thumbnail preview" style={{ width: '100%', maxWidth: 320, borderRadius: 12, marginTop: 8 }} />}
           <small className="muted">Upload an image file, or paste an image link below as a fallback.</small>
           <input type="url" placeholder="https://… (optional link fallback)" value={f.thumbnail} onChange={e => setF({ ...f, thumbnail: e.target.value })} />
@@ -278,7 +277,7 @@ export default function NewCourse() {
         <div className="field"><label htmlFor="access">Access duration (days, blank = no expiry)</label><input id="access" type="number" min="1" value={f.access_duration_days} onChange={e => setF({ ...f, access_duration_days: e.target.value })} /></div>
         <div className="field"><label htmlFor="paid">Will this course be paid or free?</label>
           <select id="paid" value={f.is_free ? 'free' : 'paid'} onChange={e => setF({ ...f, is_free: e.target.value === 'free' })}>
-            <option value="free">Free</option><option value="paid">Paid</option>
+            <option value="free">Free</option><option value="paid" disabled>Paid — coming soon</option>
           </select>
         </div>
         {!f.is_free && <div className="field"><label htmlFor="price">Price *</label><input id="price" type="number" min="0" step="0.01" required value={f.price} onChange={e => setF({ ...f, price: e.target.value })} /><small className="muted">Payment collection is not built yet — paid courses cannot be enrolled in until a payment method is added.</small></div>}
@@ -369,7 +368,7 @@ export default function NewCourse() {
               <div className="field"><label htmlFor="pass">Pass mark (%)</label><input id="pass" type="number" min="1" max="100" required value={passPercentage} onChange={e => setPassPercentage(Number(e.target.value))} /></div>
               {questions.map((q, i) => <fieldset key={i} className="panel"><legend>Question {i + 1}</legend>
                 <div className="field"><label htmlFor={`question-${i}`}>Question</label><textarea id={`question-${i}`} required rows={2} value={q.question} onChange={e => setQuestions(questions.map((x, j) => j === i ? { ...x, question: e.target.value } : x))} /></div>
-                {(['a', 'b', 'c', 'd'] as const).map(key => <div className="field" key={key}><label htmlFor={`option-${i}-${key}`}>Option {key.toUpperCase()}</label><input id={`option-${i}-${key}`} required value={q[`option_${key}`]} onChange={e => setQuestions(questions.map((x, j) => j === i ? { ...x, [`option_${key}`]: e.target.value } : x))} /></div>)}
+                {(['a', 'b', 'c', 'd'] as const).map(key => <div className="field" key={key}><label htmlFor={`option-${i}-${key}`}>Option {key.toUpperCase()}{(key === 'c' || key === 'd') ? ' (optional)' : ''}</label><input id={`option-${i}-${key}`} required={key === 'a' || key === 'b'} value={q[`option_${key}`]} onChange={e => setQuestions(questions.map((x, j) => j === i ? { ...x, [`option_${key}`]: e.target.value } : x))} /></div>)}
                 <div className="field"><label htmlFor={`answer-${i}`}>Correct answer</label><select id={`answer-${i}`} value={q.correct_answer} onChange={e => setQuestions(questions.map((x, j) => j === i ? { ...x, correct_answer: e.target.value } : x))}><option value="a">Option A</option><option value="b">Option B</option><option value="c">Option C</option><option value="d">Option D</option></select></div>
                 {questions.length > 1 && <button type="button" className="btn btn-soft" onClick={() => setQuestions(questions.filter((_, j) => j !== i))}>Remove question</button>}
               </fieldset>)}
@@ -411,7 +410,7 @@ export default function NewCourse() {
             <li>{lessonCount > 0 ? '✓' : '○'} At least one lesson — {lessonCount} added</li>
             <li>{existingFinal ? '✓' : '○'} Final exam — {existingFinal ? `“${existingFinal.title}”` : 'not added (optional)'}</li>
           </ul>
-          <p className="muted">Note: the course status has read “pending” since Step 1 — that is how the platform has always stored a new course, and it does not put it in front of an admin. Pressing Submit creates the review record the admin queue works from; you will land on the confirmation page.</p>
+          <p className="muted">Note: the course status has read “draft” since Step 1 — learners cannot see it, and it does not put it in front of an admin. Pressing Submit moves it to “pending” and creates the review record the admin queue works from; you will land on the confirmation page.</p>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" disabled={busy || !canSubmit} onClick={submitReview}>Submit for admin review</button>
             <a className="btn btn-soft" href="/instructor/courses">Finish later — My courses</a>

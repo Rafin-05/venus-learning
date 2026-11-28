@@ -30,6 +30,7 @@ export default function CourseEditor() {
   const [students, setStudents] = useState<any[]>([]);
   const [reviews, setReviews] = useState<any[]>([]);
   const [history, setHistory] = useState<any[]>([]);
+  const [attempts, setAttempts] = useState<any[]>([]);
   const [resources, setResources] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [resourceForm, setResourceForm] = useState({ title: '', description: '', lesson: '', external_url: '', asset: '' });
@@ -42,12 +43,12 @@ export default function CourseEditor() {
     try {
       const x = await api<Course>(`/courses/${id}/`);
       setC(x);
-      const [studentData, reviewData, historyData, resourceData, assignmentData] = await Promise.all([
+      const [studentData, reviewData, historyData, resourceData, assignmentData, attemptData] = await Promise.all([
         api(`/courses/${id}/students/`), api(`/courses/${id}/reviews/`), api(`/courses/${id}/review-history/`).catch(() => []),
-        api(`/resources/?course=${id}`), api(`/assignments/?course=${id}`),
+        api(`/resources/?course=${id}`), api(`/assignments/?course=${id}`), api(`/quiz-attempts/?course=${id}`).catch(() => []),
       ]);
       setStudents(list(studentData)); setReviews(list(reviewData)); setHistory(list(historyData));
-      setResources(list(resourceData)); setAssignments(list(assignmentData));
+      setResources(list(resourceData)); setAssignments(list(assignmentData)); setAttempts(list(attemptData));
       setF({
         title: x.title, subtitle: x.subtitle || '', description: x.description, category: x.category, subcategory: x.subcategory || '',
         level: x.level || '', language: x.language || 'en', thumbnail: x.thumbnail || '', promo_video_url: x.promo_video_url || '',
@@ -165,7 +166,7 @@ export default function CourseEditor() {
   return <PortalShell title={c?.title || 'Course editor'} role="Instructor">
     <div className="panel">
       <h2>Course details</h2>
-      <p className="muted">Status: <b>{c?.status}</b>{c?.status === 'pending' ? ' — a draft or awaiting admin review. Learners cannot see it yet.' : ''}</p>
+      <p className="muted">Status: <b>{c?.status}</b>{c?.status === 'draft' ? ' — not submitted yet. Learners cannot see it, and no admin review is open.' : c?.status === 'pending' ? ' — submitted and awaiting admin review. Learners cannot see it yet.' : c?.status === 'approved' ? ' — visible to learners.' : c?.status === 'rejected' ? ' — sent back by an admin. Read the review notes below, fix the course, and resubmit.' : ''}</p>
       {error && <div className="form-error" role="alert">{error}</div>}
       {notice && <p className="success">{notice}</p>}
       <AssetUpload purpose="thumbnail" course={courseId} onUploaded={url => setF(x => ({ ...x, thumbnail: url }))} />
@@ -195,7 +196,7 @@ export default function CourseEditor() {
     </div>
 
     <div className="panel">
-      <div className="panel-head"><div><h2>Curriculum</h2><p className="muted">Sections and learning items in order. Video, resource, quiz and assignment items are all lessons in a section.</p></div>
+      <div className="panel-head"><div><h2>Curriculum</h2><p className="muted">Sections and learning items in order. Video, document and coding lessons live in a section; quizzes and assignments are separate items managed below.</p></div>
         <form onSubmit={saveUnit}><label htmlFor="unit-title">{editUnit ? 'Rename unit' : 'New unit'}</label><input id="unit-title" value={unitTitle} onChange={e => setUnitTitle(e.target.value)} placeholder="Unit title" /><button className="btn btn-primary" disabled={busy}>{editUnit ? 'Save unit' : 'Add unit'}</button></form>
       </div>
       {c?.units.map(u => <div className="panel" key={u.id}>
@@ -212,7 +213,7 @@ export default function CourseEditor() {
         <div className="field"><label htmlFor="lesson-unit">Unit</label><select id="lesson-unit" value={selected ?? ''} onChange={e => setSelected(Number(e.target.value) || null)}><option value="">Choose a unit</option>{c?.units.map(u => <option key={u.id} value={u.id}>{u.title}</option>)}</select></div>
         <div className="field"><label htmlFor="lesson-title">Title *</label><input id="lesson-title" required value={l.title} onChange={e => setL({ ...l, title: e.target.value })} /></div>
         <div className="field"><label htmlFor="lesson-description">Description</label><textarea id="lesson-description" rows={2} value={l.description} onChange={e => setL({ ...l, description: e.target.value })} /></div>
-        <div className="field"><label htmlFor="lesson-type">Lesson type</label><select id="lesson-type" value={l.lesson_type} onChange={e => setL({ ...l, lesson_type: e.target.value })}><option value="video">Video</option><option value="document">Document</option><option value="coding">Coding</option><option value="resource">Resource</option><option value="quiz">Quiz</option><option value="assignment">Assignment</option></select></div>
+        <div className="field"><label htmlFor="lesson-type">Lesson type</label><select id="lesson-type" value={l.lesson_type} onChange={e => setL({ ...l, lesson_type: e.target.value })}><option value="video">Video</option><option value="document">Document</option><option value="coding">Coding</option></select></div>
         <div className="field"><label htmlFor="lesson-video">Video URL (YouTube)</label><input id="lesson-video" type="url" value={l.video_url} onChange={e => setL({ ...l, video_url: e.target.value })} /><small className="muted">The YouTube video ID is extracted and validated on the server. Unlisted videos can be embedded for enrolled learners but are not private.</small></div>
         <div className="field"><label htmlFor="lesson-document">Document URL</label><input id="lesson-document" type="url" value={l.document_url} onChange={e => setL({ ...l, document_url: e.target.value })} /></div>
         <div className="field"><label htmlFor="lesson-content">Content / instructions</label><textarea id="lesson-content" rows={3} value={l.content} onChange={e => setL({ ...l, content: e.target.value })} /></div>
@@ -268,6 +269,7 @@ export default function CourseEditor() {
       </form>
     </div>
 
+    <div className="panel"><h2>Quiz attempts</h2>{attempts.length === 0 ? <p className="muted">No quiz attempts yet.</p> : attempts.map((a: any) => <div className="problem-row" key={a.id}><div><b>{a.learner_name || 'Learner'}</b><small className="muted">{a.quiz_title} · {a.score}/{a.total} ({Math.round(a.percentage)}%) · {a.passed ? 'Passed' : 'Not passed'}</small></div><small className="muted">{a.created_at ? new Date(a.created_at).toLocaleDateString() : ''}</small></div>)}</div>
     <div className="panel"><h2>Students</h2>{students.length === 0 ? <p className="muted">No enrolled students yet.</p> : students.map((student: any, i) => <div className="problem-row" key={student.id || i}><span>{student.full_name || student.email || student.learner_name || 'Student'}</span><small className="muted">{student.progress_percent === undefined ? 'Enrolled' : `${student.progress_percent}% complete`}</small></div>)}</div>
     <div className="panel"><h2>Ratings and reviews</h2>{reviews.length === 0 ? <p className="muted">No reviews yet.</p> : reviews.map((review: any, i) => <div className="problem-row" key={review.id || i}><div><b>{review.rating}/5</b><p>{review.review || 'No written review.'}</p></div><small className="muted">{review.created_at ? new Date(review.created_at).toLocaleDateString() : ''}</small></div>)}</div>
   </PortalShell>;
