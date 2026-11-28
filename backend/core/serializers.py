@@ -330,8 +330,26 @@ class QuizSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Quiz
-        fields = ('id', 'course', 'lesson', 'title', 'pass_percentage', 'time_limit_minutes', 'attempts_allowed', 'shuffle_questions', 'shuffle_options', 'show_answers', 'questions', 'owner')
+        fields = ('id', 'course', 'lesson', 'title', 'is_final', 'pass_percentage', 'time_limit_minutes', 'attempts_allowed', 'shuffle_questions', 'shuffle_options', 'show_answers', 'questions', 'owner')
         read_only_fields = ('id', 'owner')
+
+    def validate(self, attrs):
+        # One final exam per course (same rule as Quiz.clean(); see models.py
+        # for why there is no conditional UniqueConstraint). On partial
+        # updates, fall back to the stored course / is_final values.
+        attrs = super().validate(attrs)
+        is_final = attrs.get('is_final', self.instance.is_final if self.instance else False)
+        if not is_final:
+            return attrs
+        course = attrs.get('course', self.instance.course if self.instance else None)
+        if course is None:
+            return attrs
+        clash = Quiz.objects.filter(course=course, is_final=True)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError({'is_final': 'This course already has a final exam. Unmark it first to choose another.'})
+        return attrs
 
     def validate_pass_percentage(self, value):
         if not 1 <= value <= 100:

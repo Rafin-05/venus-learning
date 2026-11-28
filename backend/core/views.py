@@ -31,6 +31,7 @@ from .asset_models import UploadedAsset
 from .mentor_models import MentorProfile, MentorSession
 from .mentor_serializers import MentorProfileSerializer, MentorSessionSerializer
 from .models import *
+from .proctor_models import ProctoredExamSession
 from .publishing import published_courses, course_is_published
 from .permissions import Verified, EditorOnly, StaffOnly
 from .serializers import *
@@ -516,7 +517,15 @@ class CourseViewSet(viewsets.ModelViewSet):
         completed = enrollment.progress.filter(lesson_id__in=lesson_ids, progress=100).count()
         if not lesson_ids or completed != len(lesson_ids):
             raise ValidationError('Complete every required lesson, including coding challenges, first.')
-        if any(not QuizAttempt.objects.filter(learner=request.user, quiz=quiz, passed=True).exists() for quiz in course.quizzes.all()):
+        # Final exam gates the certificate: when a course has a final exam,
+        # passing it (at its own pass mark) is what unlocks the certificate;
+        # regular unit/lesson quizzes no longer block it. Without a final
+        # exam, the previous rule stands — pass every course quiz.
+        final_exam = course.quizzes.filter(is_final=True).first()
+        if final_exam is not None:
+            if not QuizAttempt.objects.filter(learner=request.user, quiz=final_exam, passed=True).exists():
+                raise ValidationError('Pass the final exam first.')
+        elif any(not QuizAttempt.objects.filter(learner=request.user, quiz=quiz, passed=True).exists() for quiz in course.quizzes.all()):
             raise ValidationError('Pass all course quizzes first.')
         if any(not AssignmentSubmission.objects.filter(learner=request.user, assignment=assignment, status='graded').exists() for assignment in course.assignments.filter(is_required=True)):
             raise ValidationError('Complete all required assignments first.')
@@ -1083,6 +1092,13 @@ class QuizViewSet(viewsets.ModelViewSet):
         quiz = self.get_object()
         if request.user.role != 'learner' or not course_is_published(quiz.course) or not Enrollment.objects.filter(learner=request.user, course=quiz.course).exists():
             raise PermissionDenied('Enrollment is required.')
+        if quiz.is_final:
+            # The final exam is taken only through the monitored route
+            # (/exams/<id>/proctored), which opens an active proctoring
+            # session before the learner answers. A direct unmonitored
+            # submit has no such session and is refused.
+            if not ProctoredExamSession.objects.filter(learner=request.user, quiz=quiz, status='active').exists():
+                raise PermissionDenied('The final exam must be taken with camera monitoring.')
         require_object_body(request)
         if quiz.attempts_allowed is not None and QuizAttempt.objects.filter(learner=request.user, quiz=quiz).count() >= quiz.attempts_allowed:
             return Response({'detail': 'No attempts remain for this quiz.'}, status=409)

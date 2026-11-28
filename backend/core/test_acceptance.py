@@ -192,6 +192,55 @@ class QuizAndCertificateTests(AcceptanceBase):
         self.assertEqual(self.post(f"/api/courses/{self.course.id}/certificate/", user=self.learner).status_code, 200)
         self.assertEqual(Certificate.objects.filter(learner=self.learner, course=self.course).count(), 1)
 
+    def test_final_exam_only_one_per_course(self):
+        payload = {"course": self.course.id, "title": "Final", "pass_percentage": 60, "is_final": True, "questions": [{"question": "One?", "option_a": "yes", "option_b": "no", "option_c": "x", "option_d": "y", "correct_answer": "a"}]}
+        r = self.post("/api/quizzes/", payload, user=self.instructor)
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(r.data["is_final"])
+        # A second final exam for the same course is rejected.
+        self.assertEqual(self.post("/api/quizzes/", {**payload, "title": "Second final"}, user=self.instructor).status_code, 400)
+        # Marking an existing regular quiz as the final is rejected too.
+        self.assertEqual(self.patch(f"/api/quizzes/{self.quiz.id}/", {"is_final": True}, user=self.instructor).status_code, 400)
+        # Unmarking the final frees the slot for another quiz.
+        final_id = Quiz.objects.get(course=self.course, is_final=True).id
+        self.assertEqual(self.patch(f"/api/quizzes/{final_id}/", {"is_final": False}, user=self.instructor).status_code, 200)
+        self.assertEqual(self.patch(f"/api/quizzes/{self.quiz.id}/", {"is_final": True}, user=self.instructor).status_code, 200)
+
+    def test_final_exam_submit_requires_monitoring(self):
+        final = Quiz.objects.create(course=self.course, owner=self.instructor, title="Final", pass_percentage=50, is_final=True)
+        Question.objects.create(quiz=final, question="One?", option_a="yes", option_b="no", correct_answer="a")
+        answers = {"answers": {str(final.questions.first().id): "a"}}
+        # A direct unmonitored submit is refused and records no attempt.
+        self.assertEqual(self.post(f"/api/quizzes/{final.id}/submit/", answers, user=self.learner).status_code, 403)
+        self.assertEqual(QuizAttempt.objects.filter(quiz=final).count(), 0)
+        # After starting a monitored session, the same submit works.
+        session = self.post("/api/proctoring/", {"quiz": final.id, "consent_given": True}, user=self.learner)
+        self.assertEqual(session.status_code, 201)
+        r = self.post(f"/api/quizzes/{final.id}/submit/", answers, user=self.learner)
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.data["passed"])
+
+    def test_certificate_requires_final_exam_pass(self):
+        final = Quiz.objects.create(course=self.course, owner=self.instructor, title="Final", pass_percentage=50, is_final=True)
+        Question.objects.create(quiz=final, question="One?", option_a="yes", option_b="no", correct_answer="a")
+        extra = Quiz.objects.create(course=self.course, owner=self.instructor, title="Extra unit quiz", pass_percentage=50)
+        Question.objects.create(quiz=extra, question="One?", option_a="yes", option_b="no", correct_answer="a")
+        LessonProgress.objects.create(enrollment=self.enrollment, lesson=self.video, progress=100, completed_at=timezone.now())
+        LessonProgress.objects.create(enrollment=self.enrollment, lesson=self.coding, progress=100, completed_at=timezone.now())
+        QuizAttempt.objects.create(learner=self.learner, quiz=self.quiz, score=1, total=1, percentage=100, passed=True)
+        # Lessons done and a regular quiz passed, but the final not taken:
+        # no certificate.
+        self.assertEqual(self.post(f"/api/courses/{self.course.id}/certificate/", user=self.learner).status_code, 400)
+        # Failing the final is not enough either.
+        QuizAttempt.objects.create(learner=self.learner, quiz=final, score=0, total=1, percentage=0, passed=False)
+        self.assertEqual(self.post(f"/api/courses/{self.course.id}/certificate/", user=self.learner).status_code, 400)
+        # Passing the final unlocks the certificate, even though the extra
+        # regular quiz was never passed — the final is the certificate gate.
+        QuizAttempt.objects.create(learner=self.learner, quiz=final, score=1, total=1, percentage=100, passed=True)
+        r = self.post(f"/api/courses/{self.course.id}/certificate/", user=self.learner)
+        self.assertIn(r.status_code, (200, 201))
+        self.assertEqual(Certificate.objects.filter(learner=self.learner, course=self.course).count(), 1)
+
 
 class CodingRatingAndStaffTests(AcceptanceBase):
     @override_settings(JUDGE0_URL="https://judge.test")
