@@ -1,15 +1,17 @@
 """Tests for exam monitoring (AI proctoring v1).
 
 Covers: consent is mandatory, enrolled learners can start a session,
-event ingest updates the deterministic risk score, invalid events are
+event ingest updates the deterministic risk score (including a
+LOOKING_AWAY event adding 5), invalid events are
 rejected, learners cannot see each other's sessions, instructors can
 list and review their own courses' sessions, and a high-risk session
 is flagged (not failed) when it ends.
 
-NOTE: verified locally 2026-11-27 against the real codebase with SQLite
-(Django 5.2.18 + DRF 3.18.3): all 8 tests pass, and `makemigrations
---check --dry-run` reports no changes (migration 0011 matches the
-models). Still run once in Docker before merge, since production runs
+NOTE: verified locally 2026-11-28 against the real codebase with SQLite
+(Django 5.2.18 + DRF 3.18.3): all 9 tests pass, and `makemigrations
+--check --dry-run` reports no changes (migration 0013 only updates the
+LOOKING_AWAY choice label to match the new behaviour; no schema change
+beyond that). Still run once in Docker before merge, since production runs
 MySQL: docker compose exec api python manage.py test core.test_proctoring
 """
 
@@ -85,6 +87,20 @@ class ProctoringTests(TestCase):
         self.assertEqual(r.data['risk_score'], 20)
         self.assertEqual(r.data['risk_band'], 'low')
         self.assertEqual(r.data['event_count'], 2)
+
+    def test_looking_away_event_adds_five_to_risk_score(self):
+        session_id = self.start().data['id']
+        client = self.login('proc-learner@test.local')
+        r = client.post(f'/api/proctoring/{session_id}/events/', {
+            'events': [{'event_type': 'LOOKING_AWAY', 'detail': {
+                'reason': 'gaze-down', 'sustained_ms': 5000}}]}, format='json')
+        self.assertEqual(r.status_code, 201)
+        # LOOKING_AWAY weighs 5 (still Low).
+        self.assertEqual(r.data['risk_score'], 5)
+        self.assertEqual(r.data['risk_band'], 'low')
+        self.assertEqual(r.data['event_count'], 1)
+        self.assertEqual(r.data['events'][0]['event_type'], 'LOOKING_AWAY')
+        self.assertEqual(r.data['events'][0]['severity'], 'low')
 
     def test_invalid_event_type_is_rejected(self):
         session_id = self.start().data['id']
