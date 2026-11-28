@@ -703,6 +703,10 @@ class LessonViewSet(viewsets.ModelViewSet):
         code, language = validate_program(request.data, lesson.coding_language)
         try:
             result = execute_program(code, language, '', lesson.coding_expected_output)
+        except RunnerRateLimited:
+            return Response({'detail': 'Daily Judge0 limit reached. Try again tomorrow.'}, status=429)
+        except RunnerUnauthorized:
+            return Response({'detail': 'The code runner rejected the API key. Ask an administrator to check the Judge0 setup.'}, status=503)
         except RunnerUnavailable:
             return Response({'detail': 'The isolated code runner is unavailable or did not complete.'}, status=503)
         if result['passed']:
@@ -1136,6 +1140,16 @@ class RunnerUnavailable(Exception):
     pass
 
 
+class RunnerRateLimited(RunnerUnavailable):
+    """Judge0 / RapidAPI answered 429: the daily quota is used up."""
+    pass
+
+
+class RunnerUnauthorized(RunnerUnavailable):
+    """Judge0 / RapidAPI rejected the API key (401/403)."""
+    pass
+
+
 LANGUAGES = {'python': 71, 'javascript': 63, 'java': 62, 'cpp': 54, 'c++': 54, 'c': 50, 'go': 60, 'rust': 73}
 ALLOWED_LANGUAGE_IDS = {50, 54, 60, 62, 63, 71, 73, 74, 78}
 
@@ -1165,7 +1179,14 @@ def execute_program(code, language, stdin, expected):
         raise RunnerUnavailable()
     payload = {'source_code': code, 'language_id': language, 'stdin': stdin, 'expected_output': expected, 'cpu_time_limit': 2, 'wall_time_limit': 5, 'memory_limit': 128000, 'max_file_size': 1024, 'enable_network': False}
     headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-    if settings.JUDGE0_API_KEY:
+    if getattr(settings, 'JUDGE0_API_HOST', ''):
+        # RapidAPI mode (e.g. https://judge0-ce.p.rapidapi.com): the key goes in
+        # X-RapidAPI-Key and the host in X-RapidAPI-Host. A self-hosted Judge0
+        # instead takes the key in X-Auth-Token (see below).
+        if settings.JUDGE0_API_KEY:
+            headers['X-RapidAPI-Key'] = settings.JUDGE0_API_KEY
+        headers['X-RapidAPI-Host'] = settings.JUDGE0_API_HOST
+    elif settings.JUDGE0_API_KEY:
         headers[settings.JUDGE0_AUTH_HEADER] = settings.JUDGE0_API_KEY
     request = urllib.request.Request(base.rstrip('/') + '/submissions?base64_encoded=false&wait=true', data=json.dumps(payload).encode(), headers=headers)
     try:
@@ -1182,6 +1203,13 @@ def execute_program(code, language, stdin, expected):
             raise RunnerUnavailable()
         passed = state.get('id') == 3 and normalized_output(stdout) == normalized_output(expected)
         return {'passed': passed, 'status': str(state.get('description', 'Execution completed'))[:200], 'output': stdout[:20000], 'stderr': str(result.get('stderr') or result.get('compile_output') or '')[:20000]}
+    except urllib.error.HTTPError as err:
+        # HTTPError is a URLError subclass, so it needs its own clause first.
+        if err.code == 429:
+            raise RunnerRateLimited()
+        if err.code in (401, 403):
+            raise RunnerUnauthorized()
+        raise RunnerUnavailable()
     except (ValueError, TypeError, AttributeError, OSError, urllib.error.URLError):
         raise RunnerUnavailable()
 
@@ -1236,6 +1264,16 @@ class ProblemViewSet(viewsets.ModelViewSet):
                 if not result['passed']:
                     break
                 passed_count += 1
+        except RunnerRateLimited:
+            submission.status = 'runner_error'
+            submission.result = 'Daily Judge0 limit reached. Try again tomorrow.'
+            submission.save(update_fields=['status', 'result'])
+            return Response({'detail': submission.result, 'id': submission.id}, status=429)
+        except RunnerUnauthorized:
+            submission.status = 'runner_error'
+            submission.result = 'The code runner rejected the API key. Ask an administrator to check the Judge0 setup.'
+            submission.save(update_fields=['status', 'result'])
+            return Response({'detail': submission.result, 'id': submission.id}, status=503)
         except (RunnerUnavailable, KeyError, TypeError):
             submission.status = 'runner_error'
             submission.result = 'The execution service did not complete grading.'
