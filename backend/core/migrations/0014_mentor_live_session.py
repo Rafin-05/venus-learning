@@ -1,4 +1,8 @@
 # Generated for mentor live sessions (start/end + negotiated pricing).
+# Renumbered 0013 -> 0014: PR #18 (looking-away detection) also shipped a
+# 0013 depending on 0012_focus_session, so two 0013 leaves made Django
+# refuse to migrate ("conflicting migrations"). This file now depends on
+# that 0013, giving one linear chain: 0012 -> 0013_alter_proctorevent -> 0014.
 
 from django.db import migrations, models
 
@@ -6,7 +10,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0012_focus_session'),
+        ('core', '0013_alter_proctorevent_event_type'),
     ]
 
     operations = [
