@@ -1,5 +1,5 @@
 'use client';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PortalShell from '../../../../components/PortalShell';
 import { api, list, patch, post } from '../../../../lib/api';
@@ -9,8 +9,51 @@ type Lesson = { id: number; title: string; description?: string; lesson_type: st
 type Unit = { id: number; title: string; position: number; lessons: Lesson[] };
 type Course = { id: number; title: string; subtitle?: string; description: string; category: string; subcategory?: string; level: string; language?: string; thumbnail: string; promo_video_url?: string; outcomes?: string[]; target_audience?: string; prerequisites?: string; price?: number | string; is_free?: boolean; enrollment_open?: boolean; access_duration_days?: number | null; completion_threshold?: number; status: string; units: Unit[] };
 
-const blankLesson = () => ({ title: '', description: '', lesson_type: 'document', content: '', video_url: '', document_url: '', coding_language: '', coding_boilerplate: '', coding_expected_output: '', duration_seconds: '' as any, is_preview: false, is_required: true });
+// Video is the common lesson type, so a new lesson starts as a video lesson.
+const blankLesson = () => ({ title: '', description: '', lesson_type: 'video', content: '', video_url: '', document_url: '', coding_language: '', coding_boilerplate: '', coding_expected_output: '', duration_seconds: '' as any, is_preview: false, is_required: true });
 const assetIdFromUrl = (url: string) => url.match(/\/uploads\/([0-9a-f-]{36})\/content\//)?.[1] || '';
+
+// Video length, read the same way the learning page reads it: the
+// YouTube IFrame API player reports the real duration (the backend has
+// no duration lookup — video.py only extracts/validates the video ID).
+// The editor probes the video with a tiny hidden player; if that fails
+// the duration stays a manual field and saving is never blocked.
+declare global { interface Window { YT?: any; onYouTubeIframeAPIReady?: () => void; } }
+let ytApiPromise: Promise<any> | null = null;
+function loadYouTubeApi(): Promise<any> {
+  if (typeof window === 'undefined') return Promise.reject(new Error('YouTube API needs a browser.'));
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (ytApiPromise) return ytApiPromise;
+  ytApiPromise = new Promise((resolve, reject) => {
+    const previous = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => { try { previous?.(); } catch { /* ignore */ } resolve(window.YT); };
+    const tag = document.createElement('script');
+    tag.src = 'https://www.youtube.com/iframe_api';
+    tag.async = true;
+    tag.onerror = () => { ytApiPromise = null; reject(new Error('YouTube API failed to load.')); };
+    document.body.appendChild(tag);
+    setTimeout(() => { ytApiPromise = null; reject(new Error('YouTube API timed out.')); }, 15000);
+  });
+  return ytApiPromise;
+}
+function youtubeIdFromUrl(value: string) {
+  const v = (value || '').trim();
+  if (/^[\w-]{11}$/.test(v)) return v;
+  try {
+    const url = new URL(v);
+    if (!['http:', 'https:'].includes(url.protocol)) return '';
+    const host = url.hostname.toLowerCase();
+    let id = '';
+    if (host === 'youtu.be') id = url.pathname.slice(1).split('/')[0];
+    else if (['www.youtube.com', 'youtube.com', 'm.youtube.com', 'www.youtube-nocookie.com', 'youtube-nocookie.com'].includes(host)) id = url.searchParams.get('v') || url.pathname.match(/^\/(?:embed|shorts|live|v)\/([\w-]+)/)?.[1] || '';
+    return /^[\w-]{11}$/.test(id) ? id : '';
+  } catch { return ''; }
+}
+function formatDuration(total: number) {
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return m > 0 ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
+}
 
 export default function CourseEditor() {
   const { id } = useParams<{ id: string }>();
@@ -23,6 +66,14 @@ export default function CourseEditor() {
   const [selected, setSelected] = useState<number | null>(null);
   const [editLesson, setEditLesson] = useState<number | null>(null);
   const [editUnit, setEditUnit] = useState<number | null>(null);
+  // Which unit the lesson form is open under (null = closed). The form
+  // lives inside that unit, so the unit is already set — no dropdown
+  // to re-pick, no scrolling down to a separate panel.
+  const [lessonFormUnit, setLessonFormUnit] = useState<number | null>(null);
+  const [lessonNotice, setLessonNotice] = useState('');
+  const [durationStatus, setDurationStatus] = useState('');
+  const ytPlayerRef = useRef<any>(null);
+  const ytProbeVideoRef = useRef('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
@@ -59,6 +110,64 @@ export default function CourseEditor() {
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to load course.'); } finally { setLoading(false); }
   }, [id]);
   useEffect(() => { void load(); }, [load]);
+
+  // Auto-fill the duration for a video lesson from the video itself.
+  // Runs only when the pasted URL points at a different YouTube video;
+  // a failed lookup only sets a hint — saving is never blocked.
+  useEffect(() => {
+    if (l.lesson_type !== 'video') {
+      setDurationStatus('');
+      try { ytPlayerRef.current?.destroy?.(); } catch { /* already gone */ }
+      ytPlayerRef.current = null;
+      ytProbeVideoRef.current = '';
+      return;
+    }
+    const videoId = youtubeIdFromUrl(l.video_url || '');
+    if (!videoId) { setDurationStatus(''); return; }
+    if (videoId === ytProbeVideoRef.current) return;
+    ytProbeVideoRef.current = videoId;
+    let cancelled = false;
+    setDurationStatus('Reading the video length…');
+    const destroyProbe = () => { try { ytPlayerRef.current?.destroy?.(); } catch { /* already gone */ } ytPlayerRef.current = null; };
+    loadYouTubeApi().then((YT) => {
+      if (cancelled) return;
+      destroyProbe();
+      const el = document.getElementById('yt-duration-probe');
+      if (!el) { setDurationStatus('Could not read the video length — enter the duration manually.'); return; }
+      let attempts = 0;
+      const read = (player: any) => {
+        if (cancelled) return;
+        let d = 0;
+        try { d = Math.floor(player.getDuration() || 0); } catch { d = 0; }
+        if (d > 0) {
+          setL((x: any) => ({ ...x, duration_seconds: d }));
+          setDurationStatus(`Duration filled automatically: ${formatDuration(d)}. You can still change it.`);
+        } else if (attempts < 3) {
+          attempts += 1;
+          setTimeout(() => read(player), 1000);
+        } else {
+          setDurationStatus('Could not read the video length — enter the duration manually.');
+        }
+      };
+      try {
+        ytPlayerRef.current = new YT.Player('yt-duration-probe', {
+          videoId,
+          width: 1, height: 1,
+          playerVars: { autoplay: 0 },
+          events: {
+            onReady: (e: any) => read(e.target),
+            onError: () => { if (!cancelled) setDurationStatus('Could not read the video length — enter the duration manually.'); },
+          },
+        });
+      } catch {
+        if (!cancelled) setDurationStatus('Could not read the video length — enter the duration manually.');
+      }
+    }).catch(() => { if (!cancelled) setDurationStatus('Could not read the video length — enter the duration manually.'); });
+    return () => { cancelled = true; destroyProbe(); };
+  }, [l.lesson_type, l.video_url]);
+
+  // Never leave a probe player behind when the editor unmounts.
+  useEffect(() => () => { try { ytPlayerRef.current?.destroy?.(); } catch { /* already gone */ } }, []);
 
   const fail = (e: unknown, fallback: string) => setError(e instanceof Error ? e.message : fallback);
 
@@ -114,6 +223,43 @@ export default function CourseEditor() {
     try { await patch(`/units/${u.id}/`, { position: n.position }); await patch(`/units/${n.id}/`, { position: u.position }); await load(); } catch (e) { fail(e, 'Unable to reorder units.'); } finally { setBusy(false); }
   }
 
+  function openLessonForm(unit: Unit, lesson?: Lesson) {
+    setSelected(unit.id);
+    setLessonFormUnit(unit.id);
+    setEditLesson(lesson ? lesson.id : null);
+    setLessonNotice('');
+    setDurationStatus('');
+    ytProbeVideoRef.current = '';
+    setL(lesson ? { ...blankLesson(), ...lesson, duration_seconds: lesson.duration_seconds ?? '' } : blankLesson());
+    setError('');
+    setTimeout(() => { document.getElementById(`lesson-form-${unit.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 50);
+  }
+
+  function closeLessonForm() {
+    setLessonFormUnit(null);
+    setEditLesson(null);
+    setLessonNotice('');
+    setDurationStatus('');
+    setL(blankLesson());
+  }
+
+  // Switching lesson type clears the fields that belong to the other
+  // types, so a document lesson never saves a stale video URL (and
+  // vice versa).
+  function changeLessonType(next: string) {
+    setL((x: any) => ({
+      ...x,
+      lesson_type: next,
+      video_url: next === 'video' ? x.video_url : '',
+      document_url: next === 'document' ? x.document_url : '',
+      duration_seconds: next === 'video' ? x.duration_seconds : '',
+      coding_language: next === 'coding' ? x.coding_language : '',
+      coding_boilerplate: next === 'coding' ? x.coding_boilerplate : '',
+      coding_expected_output: next === 'coding' ? x.coding_expected_output : '',
+    }));
+    setDurationStatus('');
+  }
+
   async function saveLesson(e: FormEvent) {
     e.preventDefault();
     if (selected === null || !l.title.trim()) { setError('Select a unit and provide a lesson title.'); return; }
@@ -122,7 +268,18 @@ export default function CourseEditor() {
       const body = { ...l, unit: selected, duration_seconds: l.duration_seconds === '' ? null : Number(l.duration_seconds), ...(editLesson ? {} : { position: c?.units.find(u => u.id === selected)?.lessons.length || 0 }) };
       if (editLesson) await patch(`/lessons/${editLesson}/`, body);
       else await post('/lessons/', body);
-      setL(blankLesson()); setEditLesson(null); await load();
+      await load();
+      if (editLesson) {
+        closeLessonForm();
+        setNotice('Lesson saved.');
+      } else {
+        // Stay in the same unit, ready for the next lesson — same type,
+        // blank fields, no scrolling or re-picking the unit.
+        const nextType = l.lesson_type;
+        setL({ ...blankLesson(), lesson_type: nextType });
+        setDurationStatus('');
+        setLessonNotice('Lesson saved — add another one below, or press Done.');
+      }
     } catch (e) { fail(e, 'Unable to save lesson.'); } finally { setBusy(false); }
   }
 
@@ -160,6 +317,50 @@ export default function CourseEditor() {
     } catch (e) { fail(e, 'Unable to grade submission.'); } finally { setBusy(false); }
   }
 
+  // The lesson form, rendered inside one unit — the unit is already
+  // set, so there is no unit dropdown to re-pick. Only the fields
+  // for the chosen lesson type are shown.
+  const renderLessonForm = (unit: Unit) => (
+    <div id={`lesson-form-${unit.id}`} className="panel" style={{ marginTop: 12 }}>
+      <h3>{editLesson ? 'Edit lesson' : 'New lesson'} — {unit.title}</h3>
+      {error && <div className="form-error" role="alert">{error}</div>}
+      {lessonNotice && <p className="success">{lessonNotice}</p>}
+      <form onSubmit={saveLesson}>
+        <div className="field"><label>Unit</label><p className="muted" style={{ margin: 0 }}>{unit.title}</p></div>
+        <div className="field"><label htmlFor="lesson-title">Title *</label><input id="lesson-title" required value={l.title} onChange={e => setL({ ...l, title: e.target.value })} /></div>
+        <div className="field"><label htmlFor="lesson-description">Description</label><textarea id="lesson-description" rows={2} value={l.description} onChange={e => setL({ ...l, description: e.target.value })} /></div>
+        <div className="field"><label htmlFor="lesson-type">Lesson type</label><select id="lesson-type" value={l.lesson_type} onChange={e => changeLessonType(e.target.value)}><option value="video">Video</option><option value="document">Document</option><option value="coding">Coding</option><option value="resource">Resource</option><option value="quiz">Quiz</option><option value="assignment">Assignment</option></select></div>
+        {l.lesson_type === 'video' && <>
+          <div className="field"><label htmlFor="lesson-video">Video URL (YouTube)</label><input id="lesson-video" type="url" value={l.video_url} onChange={e => setL({ ...l, video_url: e.target.value })} placeholder="https://www.youtube.com/watch?v=…" /><small className="muted">The YouTube video ID is extracted and validated on the server. Unlisted videos can be embedded for enrolled learners but are not private.</small></div>
+          <div className="field"><label htmlFor="lesson-duration">Duration (seconds)</label><input id="lesson-duration" type="number" min="0" value={l.duration_seconds} onChange={e => setL({ ...l, duration_seconds: e.target.value })} /><small className="muted">{durationStatus || 'Paste a YouTube link above and the duration is filled in automatically. You can still type it in.'}</small></div>
+          <div id="yt-duration-probe" aria-hidden="true" style={{ width: 1, height: 1, overflow: 'hidden', position: 'absolute', opacity: 0, pointerEvents: 'none' }} />
+        </>}
+        {l.lesson_type === 'document' && <>
+          <AssetUpload purpose="document" course={courseId} onUploaded={url => setL((x: any) => ({ ...x, document_url: url }))} />
+          {l.document_url ? <p className="muted">Uploaded document: <a href={l.document_url} target="_blank" rel="noopener noreferrer">Open document ↗</a> · <button type="button" className="btn btn-soft" onClick={() => setL((x: any) => ({ ...x, document_url: '' }))}>Use a link instead</button></p>
+          : <div className="field"><label htmlFor="lesson-document">Or document link (fallback)</label><input id="lesson-document" type="url" value={l.document_url} onChange={e => setL({ ...l, document_url: e.target.value })} placeholder="https://…" /></div>}
+        </>}
+        {(l.lesson_type === 'video' || l.lesson_type === 'document' || l.lesson_type === 'coding') && <>
+          <div className="field"><label htmlFor="lesson-content">Content / instructions</label><textarea id="lesson-content" rows={3} value={l.content} onChange={e => setL({ ...l, content: e.target.value })} /></div>
+        </>}
+        {l.lesson_type === 'coding' && <>
+          <div className="field"><label htmlFor="lesson-lang">Coding language</label><input id="lesson-lang" value={l.coding_language} onChange={e => setL({ ...l, coding_language: e.target.value })} /></div>
+          <div className="field"><label htmlFor="lesson-boiler">Coding boilerplate</label><textarea id="lesson-boiler" rows={3} value={l.coding_boilerplate} onChange={e => setL({ ...l, coding_boilerplate: e.target.value })} /></div>
+          <div className="field"><label htmlFor="lesson-output">Coding expected output</label><textarea id="lesson-output" rows={3} value={l.coding_expected_output} onChange={e => setL({ ...l, coding_expected_output: e.target.value })} /></div>
+        </>}
+        {l.lesson_type === 'quiz' && <p className="muted">Quizzes are created on the <a href="/instructor/quizzes">quiz page</a> and linked to a lesson there. This lesson is the placeholder that shows in the curriculum.</p>}
+        {l.lesson_type === 'assignment' && <p className="muted">Assignments are created in the Assignments section below and linked to a lesson there. This lesson is the placeholder that shows in the curriculum.</p>}
+        {l.lesson_type === 'resource' && <p className="muted">Files are added in the Learning resources section below, attached to a lesson. This lesson is the placeholder that shows in the curriculum.</p>}
+        <div className="field"><label><input type="checkbox" checked={l.is_preview} onChange={e => setL({ ...l, is_preview: e.target.checked })} /> Free preview — anyone can watch this lesson on the approved course page</label></div>
+        <div className="field"><label><input type="checkbox" checked={l.is_required} onChange={e => setL({ ...l, is_required: e.target.checked })} /> Required for course completion</label></div>
+        <button className="btn btn-primary" disabled={busy || selected === null}>{busy ? 'Saving…' : editLesson ? 'Save lesson' : 'Add lesson'}</button>{' '}
+        {editLesson
+          ? <button type="button" className="btn btn-soft" onClick={closeLessonForm}>Cancel</button>
+          : <button type="button" className="btn btn-soft" onClick={closeLessonForm}>Done</button>}
+      </form>
+    </div>
+  );
+
   if (loading && !c) return <PortalShell title="Course editor" role="Instructor"><p className="muted">Loading curriculum…</p></PortalShell>;
   const allLessons = c?.units.flatMap(u => u.lessons) || [];
   return <PortalShell title={c?.title || 'Course editor'} role="Instructor">
@@ -169,7 +370,6 @@ export default function CourseEditor() {
       {error && <div className="form-error" role="alert">{error}</div>}
       {notice && <p className="success">{notice}</p>}
       <AssetUpload purpose="thumbnail" course={courseId} onUploaded={url => setF(x => ({ ...x, thumbnail: url }))} />
-      <AssetUpload purpose="document" course={courseId} onUploaded={url => setL((x: any) => ({ ...x, document_url: url }))} />
       <form onSubmit={saveCourse}>
         <div className="field"><label htmlFor="title">Title *</label><input id="title" required value={f.title} onChange={e => setF({ ...f, title: e.target.value })} /></div>
         <div className="field"><label htmlFor="subtitle">Subtitle</label><input id="subtitle" value={f.subtitle} onChange={e => setF({ ...f, subtitle: e.target.value })} /></div>
@@ -195,36 +395,18 @@ export default function CourseEditor() {
     </div>
 
     <div className="panel">
-      <div className="panel-head"><div><h2>Curriculum</h2><p className="muted">Sections and learning items in order. Video, resource, quiz and assignment items are all lessons in a section.</p></div>
-        <form onSubmit={saveUnit}><label htmlFor="unit-title">{editUnit ? 'Rename unit' : 'New unit'}</label><input id="unit-title" value={unitTitle} onChange={e => setUnitTitle(e.target.value)} placeholder="Unit title" /><button className="btn btn-primary" disabled={busy}>{editUnit ? 'Save unit' : 'Add unit'}</button></form>
-      </div>
+      <div className="panel-head"><div><h2>Curriculum</h2><p className="muted">Sections and learning items in order. Video, resource, quiz and assignment items are all lessons in a section. Add a unit below, then add its lessons right inside it.</p></div></div>
       {c?.units.map(u => <div className="panel" key={u.id}>
         <div className="panel-head"><div><h3>{u.position + 1}. {u.title}</h3><small className="muted">{u.lessons.length} lessons</small></div>
           <span><button className="btn btn-soft" onClick={() => { setEditUnit(u.id); setUnitTitle(u.title); }}>Rename</button><button className="btn btn-soft" disabled={!u.position || busy} onClick={() => void move(u, -1)}>↑</button><button className="btn btn-soft" disabled={u.position === c.units.length - 1 || busy} onClick={() => void move(u, 1)}>↓</button><button className="btn btn-soft" onClick={() => void remove(`/units/${u.id}/`)}>Delete</button></span>
         </div>
-        {u.lessons.map(x => <div className="problem-row" key={x.id}><div><b>{x.position + 1}. {x.title}</b><small className="muted">{x.lesson_type}{x.is_preview ? ' · free preview' : ''}{x.is_required === false ? ' · optional' : ''}{x.provider_video_id ? ` · YouTube ${x.provider_video_id}` : ''}</small></div><span><button className="btn btn-soft" onClick={() => { setSelected(u.id); setEditLesson(x.id); setL({ ...blankLesson(), ...x, duration_seconds: x.duration_seconds ?? '' }); }}>Edit</button><button className="btn btn-soft" onClick={() => void remove(`/lessons/${x.id}/`)}>Delete</button></span></div>)}
-        <button className="btn btn-soft" onClick={() => { setSelected(u.id); setEditLesson(null); setL(blankLesson()); }}>+ Add lesson</button>
+        {u.lessons.map(x => <div className="problem-row" key={x.id}><div><b>{x.position + 1}. {x.title}</b><small className="muted">{x.lesson_type}{x.is_preview ? ' · free preview' : ''}{x.is_required === false ? ' · optional' : ''}{x.provider_video_id ? ` · YouTube ${x.provider_video_id}` : ''}</small></div><span><button className="btn btn-soft" onClick={() => openLessonForm(u, x)}>Edit</button><button className="btn btn-soft" onClick={() => void remove(`/lessons/${x.id}/`)}>Delete</button></span></div>)}
+        {lessonFormUnit === u.id ? renderLessonForm(u) : <button className="btn btn-soft" onClick={() => openLessonForm(u)}>+ Add lesson</button>}
       </div>)}
-    </div>
-
-    <div className="panel"><h2>{editLesson ? 'Edit lesson' : 'New lesson'}</h2>
-      <form onSubmit={saveLesson}>
-        <div className="field"><label htmlFor="lesson-unit">Unit</label><select id="lesson-unit" value={selected ?? ''} onChange={e => setSelected(Number(e.target.value) || null)}><option value="">Choose a unit</option>{c?.units.map(u => <option key={u.id} value={u.id}>{u.title}</option>)}</select></div>
-        <div className="field"><label htmlFor="lesson-title">Title *</label><input id="lesson-title" required value={l.title} onChange={e => setL({ ...l, title: e.target.value })} /></div>
-        <div className="field"><label htmlFor="lesson-description">Description</label><textarea id="lesson-description" rows={2} value={l.description} onChange={e => setL({ ...l, description: e.target.value })} /></div>
-        <div className="field"><label htmlFor="lesson-type">Lesson type</label><select id="lesson-type" value={l.lesson_type} onChange={e => setL({ ...l, lesson_type: e.target.value })}><option value="video">Video</option><option value="document">Document</option><option value="coding">Coding</option><option value="resource">Resource</option><option value="quiz">Quiz</option><option value="assignment">Assignment</option></select></div>
-        <div className="field"><label htmlFor="lesson-video">Video URL (YouTube)</label><input id="lesson-video" type="url" value={l.video_url} onChange={e => setL({ ...l, video_url: e.target.value })} /><small className="muted">The YouTube video ID is extracted and validated on the server. Unlisted videos can be embedded for enrolled learners but are not private.</small></div>
-        <div className="field"><label htmlFor="lesson-document">Document URL</label><input id="lesson-document" type="url" value={l.document_url} onChange={e => setL({ ...l, document_url: e.target.value })} /></div>
-        <div className="field"><label htmlFor="lesson-content">Content / instructions</label><textarea id="lesson-content" rows={3} value={l.content} onChange={e => setL({ ...l, content: e.target.value })} /></div>
-        <div className="field"><label htmlFor="lesson-duration">Duration (seconds)</label><input id="lesson-duration" type="number" min="0" value={l.duration_seconds} onChange={e => setL({ ...l, duration_seconds: e.target.value })} /></div>
-        <div className="field"><label><input type="checkbox" checked={l.is_preview} onChange={e => setL({ ...l, is_preview: e.target.checked })} /> Free preview — anyone can watch this lesson on the approved course page</label></div>
-        <div className="field"><label><input type="checkbox" checked={l.is_required} onChange={e => setL({ ...l, is_required: e.target.checked })} /> Required for course completion</label></div>
-        {l.lesson_type === 'coding' && <>
-          <div className="field"><label htmlFor="lesson-lang">Coding language</label><input id="lesson-lang" value={l.coding_language} onChange={e => setL({ ...l, coding_language: e.target.value })} /></div>
-          <div className="field"><label htmlFor="lesson-boiler">Coding boilerplate</label><textarea id="lesson-boiler" rows={3} value={l.coding_boilerplate} onChange={e => setL({ ...l, coding_boilerplate: e.target.value })} /></div>
-          <div className="field"><label htmlFor="lesson-output">Coding expected output</label><textarea id="lesson-output" rows={3} value={l.coding_expected_output} onChange={e => setL({ ...l, coding_expected_output: e.target.value })} /></div>
-        </>}
-        <button className="btn btn-primary" disabled={busy || selected === null}>{busy ? 'Saving…' : editLesson ? 'Save lesson' : 'Add lesson'}</button>{editLesson && <button type="button" className="btn btn-soft" onClick={() => { setEditLesson(null); setL(blankLesson()); }}>Cancel</button>}
+      <form onSubmit={saveUnit} style={{ marginTop: 16 }}>
+        <div className="field"><label htmlFor="unit-title">{editUnit ? 'Rename unit' : 'New unit'}</label><input id="unit-title" value={unitTitle} onChange={e => setUnitTitle(e.target.value)} placeholder="Unit title" /></div>
+        <button className="btn btn-primary" disabled={busy}>{editUnit ? 'Save unit' : 'Add unit'}</button>{' '}
+        {editUnit && <button type="button" className="btn btn-soft" onClick={() => { setEditUnit(null); setUnitTitle(''); }}>Cancel</button>}
       </form>
     </div>
 
