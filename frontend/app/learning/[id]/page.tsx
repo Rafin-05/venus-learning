@@ -34,6 +34,7 @@ export default function Learning() {
   const [quizzes,setQuizzes] = useState<Quiz[]>([]);
   const [answers,setAnswers] = useState<Record<number,Record<string,string>>>({});
   const [results,setResults] = useState<Record<number,any>>({});
+  const [attempts,setAttempts] = useState<any[]>([]);
   const [progress,setProgress] = useState<Record<number,number>>({});
   const [error,setError] = useState(''); const [loading,setLoading] = useState(true);
   const [saving,setSaving] = useState(false); const [notice,setNotice] = useState('');
@@ -67,14 +68,14 @@ export default function Learning() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [curriculum,lessonResponse,quizResponse,resourceResponse,assignmentResponse] = await Promise.all([
-        api(`/courses/${id}/curriculum/`), all(`/lessons/?course=${id}`), all(`/quizzes/?course=${id}`), all(`/resources/?course=${id}`), all(`/assignments/?course=${id}`)
+      const [curriculum,lessonResponse,quizResponse,resourceResponse,assignmentResponse,attemptResponse] = await Promise.all([
+        api(`/courses/${id}/curriculum/`), all(`/lessons/?course=${id}`), all(`/quizzes/?course=${id}`), all(`/resources/?course=${id}`), all(`/assignments/?course=${id}`), all(`/quiz-attempts/?course=${id}`)
       ]);
       const currentCourse = curriculum.course || curriculum;
       const actualLessons:Lesson[] = list(lessonResponse);
       const byId = new Map(actualLessons.map(lesson => [lesson.id,lesson]));
       const currentUnits:Unit[] = (curriculum.units || currentCourse.units || []).map((unit:Unit) => ({...unit,lessons:(unit.lessons || []).map(lesson => byId.get(lesson.id)).filter(Boolean)}));
-      setCourse(currentCourse); setUnits(currentUnits); setQuizzes(list(quizResponse)); setResources(list(resourceResponse)); setAssignments(list(assignmentResponse));
+      setCourse(currentCourse); setUnits(currentUnits); setQuizzes(list(quizResponse)); setResources(list(resourceResponse)); setAssignments(list(assignmentResponse)); setAttempts(list(attemptResponse));
       const saved:Record<number,number> = {};
       actualLessons.forEach(lesson => {saved[lesson.id] = Number(lesson.progress || 0);});
       setProgress(saved); setSelectedId(current => current || actualLessons[0]?.id || null);
@@ -288,7 +289,7 @@ export default function Learning() {
   }
   async function submitQuiz(quiz:Quiz) {
     setSaving(true);setNotice('');
-    try {const result = await post(`/quizzes/${quiz.id}/submit/`,{answers:answers[quiz.id] || {}});setResults(old => ({...old,[quiz.id]:result}));}
+    try {const result = await post(`/quizzes/${quiz.id}/submit/`,{answers:answers[quiz.id] || {}});setResults(old => ({...old,[quiz.id]:result}));all(`/quiz-attempts/?course=${id}`).then(rows => setAttempts(list(rows))).catch(()=>{});}
     catch (err) {setNotice(message(err));} finally {setSaving(false);}
   }
   if (loading) return <main className="learn-page"><LearnerLoading label="Loading your course…"/></main>;
@@ -304,7 +305,11 @@ export default function Learning() {
   const requiredLessons = lessons.filter(lesson => lesson.is_required === true);
   const finalPool = requiredLessons.length > 0 ? requiredLessons : lessons;
   const finalDone = finalPool.filter(lesson => progress[lesson.id] === 100).length;
-  const finalUnlocked = finalExam !== null && (finalPool.length === 0 || finalDone === finalPool.length);
+  // A course with no lessons must not unlock its final exam: with an empty
+  // pool the learner could pass the final and still be refused a certificate
+  // ('Complete every required lesson'). The final stays locked until at least
+  // one required lesson exists and is complete.
+  const finalUnlocked = finalExam !== null && finalPool.length > 0 && finalDone === finalPool.length;
   return <main className="learn-page">
     <div className="learn-top"><Link href={`/courses/${id}`}>← Course overview</Link><span>{course.title}</span><b>{Object.values(progress).filter(value => value === 100).length} / {lessons.length} complete</b></div>
     <div className="learn-layout">{!focusSession && <aside className="lesson-nav"><h3>Course contents</h3>
@@ -334,7 +339,8 @@ export default function Learning() {
     {regularQuizzes.map(quiz => <section className="panel quiz-panel" style={{padding:24,marginTop:28}} key={quiz.id}><h2>{quiz.title}</h2><p className="muted">Pass mark: {quiz.pass_percentage}%. Answers are graded by the server.</p>{quiz.questions?.map(question => <fieldset key={question.id} style={{border:'1px solid #eadfe3',padding:16,margin:'16px 0',borderRadius:12}}><legend>{question.question}</legend>{(['a','b','c','d'] as const).map(option => {const text = question[`option_${option}`];return text ? <label key={option} style={{display:'block',margin:'10px 0'}}><input type="radio" name={`quiz-${quiz.id}-question-${question.id}`} value={option} checked={answers[quiz.id]?.[String(question.id)] === option} onChange={() => setAnswers(old => ({...old,[quiz.id]:{...old[quiz.id],[String(question.id)]:option}}))}/> {text}</label> : null;})}</fieldset>)}<button className="btn btn-primary" disabled={saving || !quiz.questions?.length || quiz.questions.some(question => !answers[quiz.id]?.[String(question.id)])} onClick={() => submitQuiz(quiz)}>Submit quiz</button>{results[quiz.id] && <p role="status">{results[quiz.id].passed ? 'Passed' : 'Not yet passed'}: {results[quiz.id].score} / {results[quiz.id].total} ({Number(results[quiz.id].percentage).toFixed(1)}%)</p>}</section>)}
     {resources.length > 0 && <section className="panel" style={{padding:24,marginTop:28}}><h2>Learning resources</h2>{resources.filter(r => !r.lesson || r.lesson === selected?.id).map(r => <p key={r.id}><a href={r.download_url} target="_blank" rel="noopener noreferrer" className="text-link">{r.title}</a>{r.description ? ` — ${r.description}` : ''}</p>)}</section>}
     {assignments.length > 0 && assignments.map(a => <section className="panel" style={{padding:24,marginTop:28}} key={a.id}><h2>{a.title}</h2><p>{a.instructions}</p><p className="muted">{a.max_points} points{a.due_at ? ` · due ${new Date(a.due_at).toLocaleString()}` : ''} · {a.accepted_types === 'file' ? 'file upload' : a.accepted_types === 'text' ? 'text response' : 'file or text'}</p>{a.accepted_types !== 'file' && <div className="field"><label htmlFor={`asg-text-${a.id}`}>Your response</label><textarea id={`asg-text-${a.id}`} rows={4} value={assignmentText[a.id] || ''} onChange={e => setAssignmentText(old => ({...old,[a.id]:e.target.value}))}/></div>}{a.accepted_types !== 'text' && <AssetUpload purpose="document" course={Number(id)} onUploaded={url => setAssignmentAsset(old => ({...old,[a.id]:url.match(/\/uploads\/([0-9a-f-]{36})\/content\//)?.[1] || ''}))} />}{assignmentAsset[a.id] && <p className="muted">File attached.</p>}<button className="btn btn-primary" disabled={saving} onClick={() => void submitAssignment(a)}>Submit assignment</button></section>)}
-    {finalExam && <section className="panel quiz-panel" style={{padding:24,marginTop:28}}><h2>Final exam: {finalExam.title}</h2><p className="muted">Pass mark: {finalExam.pass_percentage}%. This exam is taken only with camera monitoring, and passing it unlocks your certificate.</p>{finalUnlocked ? <><p>All required lessons are complete — you can take the final exam now.</p><Link className="btn btn-primary" href={`/exams/${finalExam.id}/proctored`}>Take the final exam with camera monitoring →</Link></> : <p role="status">Locked — complete {finalDone} of {finalPool.length} required lessons to unlock the final exam ({finalPool.length - finalDone} remaining).</p>}</section>}
+    {attempts.length > 0 && <section className="panel" style={{padding:24,marginTop:28}}><h2>Your quiz results</h2>{attempts.map(a => <div className="problem-row" key={a.id}><div><b>{a.quiz_title}</b><small className="muted">{a.score}/{a.total} ({Number(a.percentage).toFixed(1)}%) · {a.passed ? 'Passed' : 'Not passed'}</small></div><small className="muted">{a.created_at ? new Date(a.created_at).toLocaleDateString() : ''}</small></div>)}</section>}
+    {finalExam && <section className="panel quiz-panel" style={{padding:24,marginTop:28}}><h2>Final exam: {finalExam.title}</h2><p className="muted">Pass mark: {finalExam.pass_percentage}%. This exam is taken only with camera monitoring, and passing it unlocks your certificate.</p>{finalUnlocked ? <><p>All required lessons are complete — you can take the final exam now.</p><Link className="btn btn-primary" href={`/exams/${finalExam.id}/proctored`}>Take the final exam with camera monitoring →</Link></> : finalPool.length === 0 ? <p role="status">Locked — this course has no lessons yet. The instructor needs to add lessons before the final exam can be taken.</p> : <p role="status">Locked — complete {finalDone} of {finalPool.length} required lessons to unlock the final exam ({finalPool.length - finalDone} remaining).</p>}</section>}
     </article></div>
     {focusCongrats && <div role="dialog" aria-label="Deep Focus complete" style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,padding:20}}>
       <div className="panel" style={{padding:32,maxWidth:480,textAlign:'center'}}>
