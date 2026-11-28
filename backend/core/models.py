@@ -1,333 +1,166 @@
-from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
-from django.core.validators import MinValueValidator
+import uuid
+from decimal import Decimal
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
+from django.contrib.auth.models import AbstractBaseUser, PermissionsMixin, BaseUserManager
 from django.utils import timezone
-from django.utils.text import slugify
 
+class UserManager(BaseUserManager):
+    def create_user(self,email,password=None,**extra):
+        if not email: raise ValueError('email required')
+        user=self.model(email=self.normalize_email(email).lower().strip(),**extra)
+        if password: user.set_password(password)
+        user.save(using=self._db); return user
+    def create_superuser(self,email,password,**extra):
+        extra.update(role='admin',is_staff=True,is_superuser=True,is_verified=True,instructor_approved=True)
+        return self.create_user(email,password,**extra)
 
-class CustomUserManager(BaseUserManager):
-    def create_user(self, email, password=None, **extra):
-        email = self.normalize_email(email).lower()
-        if not email:
-            raise ValueError('Email is required')
-        user = self.model(email=email, **extra)
-        user.set_password(password)
-        user.save(using=self._db)
-        return user
-
-    def create_superuser(self, email, password=None, **extra):
-        extra.setdefault('is_staff', True)
-        extra.setdefault('is_superuser', True)
-        return self.create_user(email, password, **extra)
-
-
-class User(AbstractBaseUser, PermissionsMixin):
+class User(AbstractBaseUser,PermissionsMixin):
     ROLE_CHOICES=(('learner','Learner'),('instructor','Instructor'),('admin','Admin'))
-    email=models.EmailField(max_length=254,unique=True)
-    full_name=models.CharField(max_length=150)
-    role=models.CharField(max_length=20,choices=ROLE_CHOICES,default='learner')
+    email=models.EmailField(unique=True); full_name=models.CharField(max_length=150); role=models.CharField(max_length=20,choices=ROLE_CHOICES,default='learner')
     title=models.CharField(max_length=150,blank=True)
-    bio=models.TextField(blank=True)
-    expertise=models.CharField(max_length=255,blank=True)
-    profile_pic=models.URLField(max_length=500,blank=True)
-    points=models.PositiveIntegerField(default=0)
-    current_streak=models.PositiveIntegerField(default=0)
-    last_active_date=models.DateField(null=True,blank=True)
-    is_verified=models.BooleanField(default=False)
-    instructor_approved=models.BooleanField(default=False)
-    is_active=models.BooleanField(default=True)
-    is_staff=models.BooleanField(default=False)
-    objects=CustomUserManager()
-    USERNAME_FIELD='email'
-    REQUIRED_FIELDS=['full_name']
+    bio=models.TextField(blank=True); expertise=models.CharField(max_length=255,blank=True); profile_pic=models.URLField(blank=True)
+    is_verified=models.BooleanField(default=False); instructor_approved=models.BooleanField(default=False); is_active=models.BooleanField(default=True); is_staff=models.BooleanField(default=False); is_demo_account=models.BooleanField(default=False)
+    current_streak=models.PositiveIntegerField(default=0); points=models.PositiveIntegerField(default=0); verification_token=models.UUIDField(default=uuid.uuid4,editable=False)
+    created_at=models.DateTimeField(auto_now_add=True)
+    objects=UserManager(); USERNAME_FIELD='email'; REQUIRED_FIELDS=[]
+    def save(self,*a,**k): self.email=self.email.strip().lower(); super().save(*a,**k)
 
-    def __str__(self):
-        return f'{self.full_name} ({self.email})'
-
-
+class LoginAttempt(models.Model):
+    email=models.EmailField(); ip=models.GenericIPAddressField(); failures=models.PositiveIntegerField(default=0); locked_until=models.DateTimeField(null=True,blank=True); updated_at=models.DateTimeField(auto_now=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['email','ip'],name='unique_login_attempt')]
+class EmailToken(models.Model):
+    user=models.ForeignKey(User,on_delete=models.CASCADE); token=models.UUIDField(default=uuid.uuid4,unique=True); kind=models.CharField(max_length=20); expires_at=models.DateTimeField(); used_at=models.DateTimeField(null=True,blank=True)
 class Category(models.Model):
+    """Admin-managed course category.
+
+    Course.category stays a plain CharField holding the category *name* —
+    it is not a foreign key, so existing courses keep working unchanged.
+    The instructor create flow loads these rows into its category dropdown;
+    an admin adds new ones here (Django admin and /admin/categories).
+    The six seeded names are the categories already used across the
+    platform (see migration 0016).
+    """
     name = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['name']
+        verbose_name_plural = 'categories'
 
     def __str__(self):
         return self.name
 
 
 class Course(models.Model):
-    STATUS=(
-        ('draft','Draft'),
-        ('pending','Pending'),
-        ('approved','Approved'),
-        ('rejected','Rejected'),
-    )
-    title=models.CharField(max_length=255)
-    subtitle=models.CharField(max_length=255,blank=True)
-    description=models.TextField()
-    category=models.CharField(max_length=100,blank=True,default='General')
-    subcategory=models.CharField(max_length=100,blank=True)
-    level=models.CharField(max_length=20,default='beginner')
-    language=models.CharField(max_length=50,default='English')
-    thumbnail=models.URLField(max_length=500,blank=True)
-    promo_video_url=models.URLField(max_length=500,blank=True)
-    promo_provider_video_id=models.CharField(max_length=100,blank=True)
-    outcomes=models.JSONField(default=list,blank=True)
-    target_audience=models.TextField(blank=True)
-    prerequisites=models.TextField(blank=True)
-    price=models.DecimalField(max_digits=10,decimal_places=2,default=0)
-    is_free=models.BooleanField(default=True)
-    enrollment_open=models.BooleanField(default=True)
-    access_duration_days=models.PositiveIntegerField(null=True,blank=True)
-    completion_threshold=models.PositiveIntegerField(default=90)
-    instructor=models.ForeignKey(User,on_delete=models.CASCADE,related_name='courses')
-    status=models.CharField(max_length=20,choices=STATUS,default='draft')
-    created_at=models.DateTimeField(auto_now_add=True)
-    updated_at=models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.title
-
-
+    STATUS=(('draft','Draft'),('pending','Pending'),('approved','Approved'),('rejected','Rejected'))
+    LEVEL_CHOICES=(('beginner','Beginner'),('intermediate','Intermediate'),('advanced','Advanced'))
+    title=models.CharField(max_length=200); subtitle=models.CharField(max_length=300,blank=True); description=models.TextField(); category=models.CharField(max_length=100,blank=True); subcategory=models.CharField(max_length=100,blank=True); level=models.CharField(max_length=50,blank=True,choices=LEVEL_CHOICES); language=models.CharField(max_length=20,default='en'); thumbnail=models.URLField(blank=True); promo_video_url=models.URLField(blank=True); promo_provider_video_id=models.CharField(max_length=20,blank=True)
+    # Wizard step B (PDF §4): measurable outcomes, audience and prerequisites.
+    outcomes=models.JSONField(default=list,blank=True); target_audience=models.TextField(blank=True); prerequisites=models.TextField(blank=True)
+    # Wizard step G (PDF §4): pricing and enrollment. A free course has price 0.
+    price=models.DecimalField(max_digits=10,decimal_places=2,default=Decimal('0.00')); is_free=models.BooleanField(default=True); enrollment_open=models.BooleanField(default=True); access_duration_days=models.PositiveIntegerField(null=True,blank=True)
+    # PDF §7/§17: video completion threshold (percent watched) for required lessons.
+    completion_threshold=models.PositiveSmallIntegerField(default=90)
+    instructor=models.ForeignKey(User,on_delete=models.CASCADE,related_name='courses'); status=models.CharField(max_length=20,choices=STATUS,default='draft'); created_at=models.DateTimeField(auto_now_add=True); updated_at=models.DateTimeField(auto_now=True)
 class Unit(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='units')
-    title=models.CharField(max_length=255)
-    position=models.PositiveIntegerField(default=1)
-
-    class Meta:
-        ordering=['position','id']
-
-    def __str__(self):
-        return f'{self.course.title} - {self.title}'
-
-
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='units'); title=models.CharField(max_length=200); position=models.PositiveIntegerField(default=0)
+    class Meta: ordering=['position','id']
 class Lesson(models.Model):
-    LESSON_TYPES=(
-        ('video','Video'),
-        ('document','Document'),
-        ('coding','Coding'),
-    )
-    unit=models.ForeignKey(Unit,on_delete=models.CASCADE,related_name='lessons')
-    title=models.CharField(max_length=255)
-    content=models.TextField(blank=True)
-    video_url=models.URLField(max_length=500,blank=True)
-    video_provider_id=models.CharField(max_length=100,blank=True)
-    video_duration=models.PositiveIntegerField(null=True,blank=True)
-    document_url=models.URLField(max_length=500,blank=True)
-    lesson_type=models.CharField(max_length=20,default='document',choices=LESSON_TYPES)
-    is_required=models.BooleanField(default=True)
-    position=models.PositiveIntegerField(default=1)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        ordering=['position','id']
-
-    def __str__(self):
-        return f'{self.unit.title} - {self.title}'
-
-
-class CourseReview(models.Model):
-    DECISIONS=(('submitted','Submitted'),('approved','Approved'),('rejected','Rejected'),('changes_requested','Changes requested'))
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='course_reviews')
-    reviewer=models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True,related_name='course_reviews')
-    decision=models.CharField(max_length=20,choices=DECISIONS)
-    notes=models.TextField(blank=True)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
+    LESSON_TYPES=(('video','Video'),('document','Document'),('coding','Coding'))
+    unit=models.ForeignKey(Unit,on_delete=models.CASCADE,related_name='lessons'); title=models.CharField(max_length=200); description=models.TextField(blank=True); content=models.TextField(blank=True); video_url=models.URLField(blank=True)
+    # Provider-neutral video record (PDF §6): provider + provider_video_id, not a raw URL.
+    # 'youtube' is the initial provider; other HTTPS hosts are stored as 'external'.
+    provider=models.CharField(max_length=20,default='youtube'); provider_video_id=models.CharField(max_length=20,blank=True)
+    document_url=models.URLField(blank=True); lesson_type=models.CharField(max_length=20,default='document',choices=LESSON_TYPES); coding_language=models.CharField(max_length=50,blank=True); coding_boilerplate=models.TextField(blank=True); coding_expected_output=models.TextField(blank=True); position=models.PositiveIntegerField(default=0)
+    duration_seconds=models.PositiveIntegerField(null=True,blank=True); is_preview=models.BooleanField(default=False); is_required=models.BooleanField(default=True)
+    class Meta: ordering=['position','id']
 class Enrollment(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='enrollments')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='enrollments')
-    enrolled_at=models.DateTimeField(auto_now_add=True)
-    completed_at=models.DateTimeField(null=True,blank=True)
-
-    class Meta:
-        unique_together=(('course','learner'),)
-
-
+    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='enrollments'); course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='enrollments'); enrolled_at=models.DateTimeField(auto_now_add=True); completed_at=models.DateTimeField(null=True,blank=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['learner','course'],name='unique_enrollment')]
 class LessonProgress(models.Model):
-    enrollment=models.ForeignKey(Enrollment,on_delete=models.CASCADE,related_name='progress')
-    lesson=models.ForeignKey(Lesson,on_delete=models.CASCADE,related_name='progress')
-    progress=models.PositiveIntegerField(default=0)
-    updated_at=models.DateTimeField(auto_now=True)
-
-    class Meta:
-        unique_together=(('enrollment','lesson'),)
-
-
+    enrollment=models.ForeignKey(Enrollment,on_delete=models.CASCADE,related_name='progress'); lesson=models.ForeignKey(Lesson,on_delete=models.CASCADE); progress=models.PositiveSmallIntegerField(default=0); completed_at=models.DateTimeField(null=True,blank=True)
+    # PDF §7: actual playback progress, not just "opened the lesson".
+    watched_seconds=models.PositiveIntegerField(default=0); duration_seconds=models.PositiveIntegerField(null=True,blank=True); watch_percentage=models.PositiveSmallIntegerField(default=0); resume_position_seconds=models.PositiveIntegerField(default=0); updated_at=models.DateTimeField(auto_now=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['enrollment','lesson'],name='unique_lesson_progress')]
 class Certificate(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='certificates')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='certificates')
-    certificate_no=models.CharField(max_length=32,unique=True,blank=True)
-    issued_at=models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together=(('course','learner'),)
-
-    def save(self, *args, **kwargs):
-        if not self.certificate_no:
-            self.certificate_no='VL-'+slugify(f'{self.course_id}-{self.learner_id}-{timezone.now().timestamp()}')[:24].upper()
-        super().save(*args, **kwargs)
-
-
-class Question(models.Model):
-    quiz=models.ForeignKey('Quiz',on_delete=models.CASCADE,related_name='questions')
-    question_text=models.TextField()
-    option_a=models.CharField(max_length=1000)
-    option_b=models.CharField(max_length=1000)
-    option_c=models.CharField(max_length=1000,blank=True)
-    option_d=models.CharField(max_length=1000,blank=True)
-    correct_answer=models.CharField(max_length=1,choices=(('a','A'),('b','B'),('c','C'),('d','D')))
-
-
+    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='certificates'); course=models.ForeignKey(Course,on_delete=models.CASCADE); issued_at=models.DateTimeField(auto_now_add=True); certificate_no=models.UUIDField(default=uuid.uuid4,unique=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['learner','course'],name='unique_certificate')]
+class FocusSession(models.Model):
+    """Deep Focus session: a learner watches course videos without
+    switching tabs for 30 or 60 minutes. Completing the benchmark
+    earns a badge (30- or 60-minute); switching tabs, minimizing or
+    closing ends the session with no badge. No points are involved."""
+    TARGETS=((30,'30 minutes'),(60,'60 minutes')); STATUSES=(('active','Active'),('completed','Completed'),('interrupted','Interrupted'))
+    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='focus_sessions'); target_minutes=models.PositiveSmallIntegerField(choices=TARGETS); started_at=models.DateTimeField(auto_now_add=True); ended_at=models.DateTimeField(null=True,blank=True); focused_seconds=models.PositiveIntegerField(default=0); status=models.CharField(max_length=20,choices=STATUSES,default='active')
+    class Meta: ordering=['-started_at','-id']
 class Quiz(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='quizzes')
-    lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='quizzes')
-    title=models.CharField(max_length=255)
-    pass_percentage=models.PositiveIntegerField(default=70)
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='quizzes'); lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='quizzes'); title=models.CharField(max_length=200); owner=models.ForeignKey(User,on_delete=models.CASCADE); pass_percentage=models.PositiveSmallIntegerField(default=70)
+    time_limit_minutes=models.PositiveIntegerField(null=True,blank=True); attempts_allowed=models.PositiveIntegerField(null=True,blank=True); shuffle_questions=models.BooleanField(default=False); shuffle_options=models.BooleanField(default=False); show_answers=models.CharField(max_length=20,default='after_review',choices=(('immediate','Immediately'),('after_review','After review'),('never','Never')))
+    # Final exam: at most one per course. It sits after all lessons, is taken
+    # only with camera monitoring, and gates the certificate. Regular quizzes
+    # (is_final=False) stay freely addable after any unit/lesson.
     is_final=models.BooleanField(default=False)
-    created_at=models.DateTimeField(auto_now_add=True)
 
-    class Meta:
-        ordering=['id']
-
-
-class QuizAttempt(models.Model):
-    quiz=models.ForeignKey(Quiz,on_delete=models.CASCADE,related_name='attempts')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='quiz_attempts')
-    score=models.PositiveIntegerField()
-    total=models.PositiveIntegerField()
-    percentage=models.FloatField()
-    passed=models.BooleanField(default=False)
-    answers=models.JSONField(default=dict)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
-class Assignment(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='assignments')
-    lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='assignments')
-    title=models.CharField(max_length=255)
-    instructions=models.TextField(blank=True)
-    due_at=models.DateTimeField(null=True,blank=True)
-    max_points=models.PositiveIntegerField(default=100)
-    rubric=models.TextField(blank=True)
-    accepted_types=models.CharField(max_length=255,blank=True,default='pdf,docx,txt,zip')
-    is_required=models.BooleanField(default=True)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
-class AssignmentSubmission(models.Model):
-    STATUS=(('submitted','Submitted'),('graded','Graded'))
-    assignment=models.ForeignKey(Assignment,on_delete=models.CASCADE,related_name='submissions')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='assignment_submissions')
-    text_response=models.TextField(blank=True)
-    asset=models.ForeignKey('asset_models.UploadedAsset',on_delete=models.SET_NULL,null=True,blank=True,related_name='assignment_submissions')
-    attempt_no=models.PositiveIntegerField(default=1)
-    status=models.CharField(max_length=20,choices=STATUS,default='submitted')
-    score=models.FloatField(null=True,blank=True)
-    feedback=models.TextField(blank=True)
-    graded_by=models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True,related_name='graded_assignments')
-    graded_at=models.DateTimeField(null=True,blank=True)
-    submitted_at=models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together=(('assignment','learner','attempt_no'),)
-        ordering=['-submitted_at','-id']
-
-
+    def clean(self):
+        # One final exam per course. No conditional UniqueConstraint here:
+        # MySQL does not support partial unique indexes, so a conditioned
+        # constraint would silently become a plain unique on course and
+        # forbid regular quizzes. The API enforces the same rule in
+        # QuizSerializer.validate(); clean() covers admin/forms.
+        super().clean()
+        if self.is_final and self.course_id:
+            clash = Quiz.objects.filter(course_id=self.course_id, is_final=True)
+            if self.pk:
+                clash = clash.exclude(pk=self.pk)
+            if clash.exists():
+                raise DjangoValidationError({'is_final': 'This course already has a final exam. Unmark it first to choose another.'})
+class CourseReview(models.Model):
+    """Audit trail for the admin review workflow (PDF §13)."""
+    DECISIONS=(('submitted','Submitted for review'),('approved','Approved'),('rejected','Rejected'),('changes_requested','Changes requested'))
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='course_reviews'); reviewer=models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True,related_name='course_reviews'); decision=models.CharField(max_length=20,choices=DECISIONS); notes=models.TextField(blank=True); created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=['-created_at','-id']
 class CourseResource(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='resources')
-    lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='resources')
-    title=models.CharField(max_length=255)
-    description=models.TextField(blank=True)
-    asset=models.ForeignKey('asset_models.UploadedAsset',on_delete=models.SET_NULL,null=True,blank=True,related_name='resources')
-    external_url=models.URLField(max_length=500,blank=True)
-    downloadable=models.BooleanField(default=True)
-    original_name=models.CharField(max_length=255,blank=True)
-    mime_type=models.CharField(max_length=100,blank=True)
-    size_bytes=models.PositiveIntegerField(default=0)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
-class Rating(models.Model):
-    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='ratings')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='ratings')
-    rating=models.PositiveSmallIntegerField()
-    review=models.TextField(blank=True)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
+    """Downloadable learning resource (PDF §8), at course level or attached to a lesson."""
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='resources'); lesson=models.ForeignKey(Lesson,on_delete=models.CASCADE,null=True,blank=True,related_name='resources'); title=models.CharField(max_length=200); description=models.TextField(blank=True); asset=models.ForeignKey('core.UploadedAsset',on_delete=models.SET_NULL,null=True,blank=True,related_name='course_resources'); external_url=models.URLField(blank=True); downloadable=models.BooleanField(default=True); original_name=models.CharField(max_length=255,blank=True); mime_type=models.CharField(max_length=100,blank=True); size_bytes=models.PositiveIntegerField(null=True,blank=True); created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=['created_at','id']
+class Assignment(models.Model):
+    """Homework assignment (PDF §10), attached to a course and optionally to a lesson item."""
+    ACCEPTED=(('file','File upload'),('text','Text response'),('both','File or text'))
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='assignments'); lesson=models.ForeignKey(Lesson,on_delete=models.SET_NULL,null=True,blank=True,related_name='assignments'); title=models.CharField(max_length=200); instructions=models.TextField(); due_at=models.DateTimeField(null=True,blank=True); max_points=models.PositiveIntegerField(default=100); rubric=models.TextField(blank=True); accepted_types=models.CharField(max_length=10,default='both',choices=ACCEPTED); is_required=models.BooleanField(default=False); created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=['created_at','id']
+class AssignmentSubmission(models.Model):
+    STATUSES=(('submitted','Submitted'),('late','Late'),('under_review','Under review'),('graded','Graded'),('needs_resubmission','Needs resubmission'))
+    assignment=models.ForeignKey(Assignment,on_delete=models.CASCADE,related_name='submissions'); learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='assignment_submissions'); text_response=models.TextField(blank=True); asset=models.ForeignKey('core.UploadedAsset',on_delete=models.SET_NULL,null=True,blank=True,related_name='assignment_submissions'); attempt_no=models.PositiveIntegerField(default=1); status=models.CharField(max_length=20,choices=STATUSES,default='submitted'); score=models.PositiveIntegerField(null=True,blank=True); feedback=models.TextField(blank=True); graded_by=models.ForeignKey(User,on_delete=models.SET_NULL,null=True,blank=True,related_name='graded_submissions'); graded_at=models.DateTimeField(null=True,blank=True); submitted_at=models.DateTimeField(auto_now_add=True)
+    class Meta: ordering=['-submitted_at','-id']
+class Question(models.Model):
+    quiz=models.ForeignKey(Quiz,on_delete=models.CASCADE,related_name='questions'); question=models.TextField(); option_a=models.CharField(max_length=500); option_b=models.CharField(max_length=500); option_c=models.CharField(max_length=500,blank=True); option_d=models.CharField(max_length=500,blank=True); correct_answer=models.CharField(max_length=1,choices=[(x,x) for x in 'abcd'])
+class QuizAttempt(models.Model):
+    learner=models.ForeignKey(User,on_delete=models.CASCADE); quiz=models.ForeignKey(Quiz,on_delete=models.CASCADE); score=models.PositiveIntegerField(); total=models.PositiveIntegerField(default=0); percentage=models.DecimalField(max_digits=5,decimal_places=2,default=0); passed=models.BooleanField(default=False); answers=models.JSONField(default=dict); created_at=models.DateTimeField(auto_now_add=True)
+class Contest(models.Model):
+    title=models.CharField(max_length=200); description=models.TextField(blank=True); starts_at=models.DateTimeField(); ends_at=models.DateTimeField(); prize=models.CharField(max_length=200,blank=True); prizes=models.JSONField(default=list,blank=True); owner=models.ForeignKey(User,on_delete=models.CASCADE); questions=models.JSONField(default=list)
+class ContestAttempt(models.Model):
+    contest=models.ForeignKey(Contest,on_delete=models.CASCADE); learner=models.ForeignKey(User,on_delete=models.CASCADE); score=models.PositiveIntegerField(); total=models.PositiveIntegerField(default=0); percentage=models.DecimalField(max_digits=5,decimal_places=2,default=0); answers=models.JSONField(default=dict); created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['contest','learner'],name='unique_contest_attempt')]
 class Problem(models.Model):
-    title=models.CharField(max_length=255)
-    statement=models.TextField()
-    input_format=models.TextField(blank=True)
-    output_format=models.TextField(blank=True)
-    test_cases=models.JSONField(default=list)
-    owner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='problems')
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
+    title=models.CharField(max_length=200); statement=models.TextField(); input_format=models.TextField(blank=True); output_format=models.TextField(blank=True); owner=models.ForeignKey(User,on_delete=models.CASCADE); test_cases=models.JSONField(default=list)
 class Submission(models.Model):
-    STATUS=(('accepted','Accepted'),('failed','Failed'),('runner_error','Runner error'))
-    problem=models.ForeignKey(Problem,on_delete=models.CASCADE,related_name='submissions')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='submissions')
-    code=models.TextField()
-    language=models.CharField(max_length=20,default='71')
-    status=models.CharField(max_length=20,choices=STATUS,default='failed')
-    result=models.TextField(blank=True)
-    created_at=models.DateTimeField(auto_now_add=True)
-
+    problem=models.ForeignKey(Problem,on_delete=models.CASCADE); learner=models.ForeignKey(User,on_delete=models.CASCADE); code=models.TextField(); language=models.CharField(max_length=30); status=models.CharField(max_length=30,default='pending'); result=models.TextField(blank=True); created_at=models.DateTimeField(auto_now_add=True)
+class Rating(models.Model):
+    course=models.ForeignKey(Course,on_delete=models.CASCADE,related_name='ratings'); learner=models.ForeignKey(User,on_delete=models.CASCADE); rating=models.PositiveSmallIntegerField(); review=models.TextField(blank=True); created_at=models.DateTimeField(auto_now_add=True)
+    class Meta: constraints=[models.UniqueConstraint(fields=['course','learner'],name='unique_rating')]
+class SupportTicket(models.Model):
+    user=models.ForeignKey(User,on_delete=models.CASCADE,related_name='tickets'); subject=models.CharField(max_length=200); message=models.TextField(); response=models.TextField(blank=True); status=models.CharField(max_length=20,default='open'); created_at=models.DateTimeField(auto_now_add=True)
+class DailyActivity(models.Model):
+    user=models.ForeignKey(User,on_delete=models.CASCADE,related_name='daily_activity'); day=models.DateField(default=timezone.now)
+    class Meta: constraints=[models.UniqueConstraint(fields=['user','day'],name='unique_daily_activity')]
 
 class ProblemCompletion(models.Model):
     learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='problem_completions')
-    problem=models.ForeignKey(Problem,on_delete=models.CASCADE,related_name='completions')
-    created_at=models.DateTimeField(auto_now_add=True)
-
+    problem=models.ForeignKey(Problem,on_delete=models.CASCADE)
+    completed_at=models.DateTimeField(auto_now_add=True)
     class Meta:
-        unique_together=(('learner','problem'),)
-
-
-class Contest(models.Model):
-    title=models.CharField(max_length=255)
-    description=models.TextField(blank=True)
-    starts_at=models.DateTimeField()
-    ends_at=models.DateTimeField()
-    prize=models.CharField(max_length=255,blank=True)
-    prizes=models.JSONField(default=list,blank=True)
-    questions=models.JSONField(default=list)
-    owner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='contests')
-    created_at=models.DateTimeField(auto_now_add=True)
-
-
-class ContestAttempt(models.Model):
-    contest=models.ForeignKey(Contest,on_delete=models.CASCADE,related_name='attempts')
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='contest_attempts')
-    score=models.PositiveIntegerField()
-    total=models.PositiveIntegerField()
-    percentage=models.FloatField()
-    answers=models.JSONField(default=dict)
-    created_at=models.DateTimeField(auto_now_add=True)
-
-    class Meta:
-        unique_together=(('contest','learner'),)
-
-
-class FocusSession(models.Model):
-    TARGET_MINUTES=(30,60)
-    learner=models.ForeignKey(User,on_delete=models.CASCADE,related_name='focus_sessions')
-    target_minutes=models.PositiveIntegerField()
-    started_at=models.DateTimeField(auto_now_add=True)
-    ended_at=models.DateTimeField(null=True,blank=True)
-    focused_seconds=models.PositiveIntegerField(default=0)
-    status=models.CharField(max_length=20,default='active')
-
-
-class SupportTicket(models.Model):
-    STATUS=(('open','Open'),('in_progress','In progress'),('resolved','Resolved'),('closed','Closed'))
-    user=models.ForeignKey(User,on_delete=models.CASCADE,related_name='tickets')
-    subject=models.CharField(max_length=255)
-    message=models.TextField()
-    response=models.TextField(blank=True)
-    status=models.CharField(max_length=20,choices=STATUS,default='open')
-    created_at=models.DateTimeField(auto_now_add=True)
+        constraints=[models.UniqueConstraint(fields=['learner','problem'],name='unique_problem_completion')]
+from .asset_models import UploadedAsset
+from .mentor_models import MentorProfile, Wallet, WalletTransaction, MentorSession, SessionRequest, MentorOffer, SessionRating
+from .proctor_models import ProctoredExamSession, ProctorEvent
