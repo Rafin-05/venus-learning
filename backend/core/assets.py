@@ -99,7 +99,9 @@ class AssetUploadView(APIView):
                     request.user.save(update_fields=['profile_pic'])
                 elif purpose == 'thumbnail' and course is not None:
                     course.thumbnail = url
-                    if not staff(request.user):
+                    # A thumbnail edit sends a published course back for review; a draft
+                    # stays a draft and a rejected course stays rejected.
+                    if not staff(request.user) and course.status == 'approved':
                         course.status = 'pending'
                     course.save(update_fields=['thumbnail', 'status'])
         except Exception:
