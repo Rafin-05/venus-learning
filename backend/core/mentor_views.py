@@ -118,6 +118,10 @@ class MentorOfferViewSet(viewsets.ModelViewSet):
         if MentorOffer.objects.filter(session_request=session_request, mentor=user).exists():
             raise ValidationError('You already made an offer on this request.')
         profile = MentorProfile.objects.filter(user=user).first()
+        pricing_type = serializer.validated_data.get('pricing_type') or 'hourly'
+        agreed_amount = serializer.validated_data.get('agreed_amount')
+        if pricing_type == 'fixed' and (agreed_amount is None or agreed_amount <= 0):
+            raise ValidationError('A fixed-price offer needs an agreed amount above zero.')
         hourly_rate = serializer.validated_data.get('hourly_rate')
         if hourly_rate is None:
             if profile is None:
@@ -145,11 +149,16 @@ class MentorOfferViewSet(viewsets.ModelViewSet):
             raise ValidationError('This offer can no longer be accepted.')
         with transaction.atomic():
             duration = session_request.preferred_duration_hours
+            if offer.pricing_type == 'fixed':
+                total_fee = offer.agreed_amount
+            else:
+                total_fee = offer.hourly_rate * duration
             session = MentorSession.objects.create(
                 student=request.user, mentor=offer.mentor, mentor_profile=offer.mentor_profile,
                 source='request', session_request=session_request, offer=offer,
                 topic=session_request.topic, duration_hours=duration,
-                hourly_rate=offer.hourly_rate, total_fee=offer.hourly_rate * duration,
+                hourly_rate=offer.hourly_rate, pricing_type=offer.pricing_type,
+                agreed_amount=offer.agreed_amount, total_fee=total_fee,
                 scheduled_at=offer.proposed_time, status='confirmed')
             offer.status = 'accepted'
             offer.save(update_fields=['status'])
@@ -232,6 +241,41 @@ class MentorSessionViewSet(viewsets.ModelViewSet):
         session.status = 'completed'
         session.save(update_fields=['status', 'updated_at'])
         return Response(MentorSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'])
+    def start(self, request, pk=None):
+        session = self.get_object()
+        if session.mentor_id != request.user.id and not staff(request.user):
+            raise PermissionDenied('Only the mentor can start this session.')
+        if session.status != 'confirmed':
+            raise ValidationError('Only a confirmed session can be started.')
+        if not session.meet_link:
+            raise ValidationError('Add a Google Meet link before starting the session.')
+        session.status = 'live'
+        session.started_at = timezone.now()
+        session.save(update_fields=['status', 'started_at', 'updated_at'])
+        return Response(MentorSessionSerializer(session).data)
+
+    @action(detail=True, methods=['post'])
+    def end(self, request, pk=None):
+        session = self.get_object()
+        if session.mentor_id != request.user.id and not staff(request.user):
+            raise PermissionDenied('Only the mentor can end this session.')
+        if session.status != 'live':
+            raise ValidationError('Only a live session can be ended.')
+        ended_at = timezone.now()
+        session.status = 'completed'
+        session.ended_at = ended_at
+        session.save(update_fields=['status', 'ended_at', 'updated_at'])
+        elapsed_minutes = max(0, int((ended_at - session.started_at).total_seconds() // 60)) if session.started_at else 0
+        deduction, credited = split_fee(session.total_fee)
+        return Response({
+            'session': MentorSessionSerializer(session).data,
+            'elapsed_minutes': elapsed_minutes,
+            'total_fee': str(session.total_fee),
+            'platform_deduction': str(deduction),
+            'credited_to_mentor': str(credited),
+        })
 
     @action(detail=True, methods=['post'])
     def pay(self, request, pk=None):
