@@ -6,6 +6,7 @@ from .mentor_views import MentorOfferViewSet, MentorProfileViewSet, MentorSessio
 from .proctor_views import ProctoredExamViewSet
 from .views import *
 router=DefaultRouter()
+router.register('categories',CategoryViewSet,basename='category')
 router.register('courses',CourseViewSet,basename='course')
 router.register('units',UnitViewSet,basename='unit')
 router.register('enrollments',EnrollmentViewSet,basename='enrollment')

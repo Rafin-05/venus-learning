@@ -39,7 +39,7 @@ class AccountAdmin(UserAdmin):
     add_fieldsets = ((None, {'classes': ('wide',), 'fields': ('email', 'full_name', 'role', 'password1', 'password2')}),)
 
 
-for model in (Course, Unit, Lesson, Enrollment, LessonProgress, Certificate, Quiz, Question, QuizAttempt, Contest, ContestAttempt, Problem, ProblemCompletion, Submission, Rating, SupportTicket, LoginAttempt, EmailToken, DailyActivity):
+for model in (Category, Course, Unit, Lesson, Enrollment, LessonProgress, Certificate, Quiz, Question, QuizAttempt, Contest, ContestAttempt, Problem, ProblemCompletion, Submission, Rating, SupportTicket, LoginAttempt, EmailToken, DailyActivity):
     admin.site.register(model)
 
 
